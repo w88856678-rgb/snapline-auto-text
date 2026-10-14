@@ -4,6 +4,7 @@
 name: macOS build and test
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:

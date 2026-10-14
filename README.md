@@ -68,6 +68,6 @@ python3 Tests/Standalone/run.py --build-root .build
 
 ## CI 与发布范围
 
-`.github/workflows/release.yml` 在 main 分支推送和针对 main 的 Pull Request 上使用 macOS runner：先执行标准 `swift test`，再构建 universal 应用，并上传 DMG/ZIP 构建产物。应用内版本为 **1.6.6**；main 产物标记为 `1.6.6`，PR 产物标记为 `dev`，用于评审，不代表正式发布。
+`.github/workflows/release.yml` 在 main 分支推送、针对 main 的 Pull Request 或手动触发时使用 macOS runner：先执行标准 `swift test`，再构建 universal 应用，并上传 DMG/ZIP 构建产物。应用内版本为 **1.6.6**；main 产物标记为 `1.6.6`，PR 产物标记为 `dev`，用于评审，不代表正式发布。
 
 CI 仅有仓库读取权限，不构建 Windows、不在 tag 上触发发布，也不自动创建 GitHub Release。
