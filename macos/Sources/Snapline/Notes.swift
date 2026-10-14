@@ -20,18 +20,18 @@ enum Notes {
     static func isNote(_ url: URL) -> Bool { Settings.current.notes[url.path] != nil }
     static func get(_ url: URL) -> Settings.NoteData? { Settings.current.notes[url.path] }
 
-    /// A fresh, empty note of the given colour. Returns its picture.
-    static func create(color: String) -> URL {
+    /// A fresh note of the given colour. Returns its picture.
+    static func create(color: String, text: String = "", in folder: URL = Inbox.folder) -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HHmmss"
         let stamp = formatter.string(from: Date())
-        var url = Inbox.folder.appendingPathComponent("Note \(stamp).png")
+        var url = folder.appendingPathComponent("Note \(stamp).png")
         var n = 2
         while FileManager.default.fileExists(atPath: url.path) {
-            url = Inbox.folder.appendingPathComponent("Note \(stamp) (\(n)).png")
+            url = folder.appendingPathComponent("Note \(stamp) (\(n)).png")
             n += 1
         }
-        let data = Settings.NoteData(text: "", color: color)
+        let data = Settings.NoteData(text: text, color: color)
         Settings.current.notes[url.path] = data
         render(data, to: url)
         Settings.save()
@@ -94,7 +94,9 @@ enum Notes {
         NSGradient(starting: paper.blended(withFraction: 0.45, of: .white) ?? paper, ending: paper)?.draw(in: curlPath, angle: 45)
 
         // The words. Text is drawn unflipped, so flip back around its own box.
-        let text = note.text
+        // The editable note retains the full text. Bound layout work for a
+        // large copy; only the first few lines can fit on the paper anyway.
+        let text = String(note.text.prefix(4000))
         let rtl = text.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) }
         let style = NSMutableParagraphStyle()
         style.alignment = rtl ? .right : .left

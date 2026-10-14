@@ -54,6 +54,7 @@ struct SettingsView: View {
             Section(L("The line")) {
                 Toggle(L("Stay down until each capture is used"), isOn: $s.stayDownWhileUnused)
                 Toggle(L("Take down after dragging into an app"), isOn: $s.takeDownAfterDrag)
+                Toggle("在全屏应用上显示 / Show over full screen apps", isOn: $s.showOverFullScreen)
                 Toggle(L("Arrange photos evenly along the line"), isOn: $s.autoArrange)
                 HStack {
                     Text(L("Distance from the top of the screen"))
@@ -79,6 +80,7 @@ struct SettingsView: View {
                 }
             }
             Section(L("Captures")) {
+                Toggle("复制文字自动挂上 / Auto-hang copied text", isOn: $s.autoHangCopiedText)
                 Toggle(L("Catch clipboard captures"), isOn: $s.catchClipboard)
                 Toggle(L("Handle screenshots"), isOn: Binding(get: { Inbox.isEnabled }, set: { on in
                     NotificationCenter.default.post(name: .snaplineInboxToggle, object: on)
@@ -102,6 +104,7 @@ struct SettingsView: View {
         .environment(\.layoutDirection, Localization.isRTL ? .rightToLeft : .leftToRight)
         .onChange(of: s.stayDownWhileUnused) { _, _ in apply() }
         .onChange(of: s.takeDownAfterDrag) { _, _ in apply() }
+        .onChange(of: s.showOverFullScreen) { _, _ in apply() }
         .onChange(of: s.autoArrange) { _, _ in apply() }
         .onChange(of: s.lineOffset) { _, _ in apply() }
         .onChange(of: s.ropeColor) { _, _ in apply() }
@@ -110,11 +113,20 @@ struct SettingsView: View {
         .onChange(of: s.appearance) { _, _ in apply() }
         .onChange(of: s.language) { _, _ in apply(); DispatchQueue.main.async { SettingsWindow.rebuild() } }
         .onChange(of: s.catchClipboard) { _, _ in apply() }
+        .onChange(of: s.autoHangCopiedText) { _, _ in apply() }
         .onChange(of: s.soundOn) { _, _ in apply() }
     }
 
     private func apply() {
-        Settings.current = s
+        // Captures and note edits may arrive while this window is open.
+        // Applying a preference must not replace those newer live records.
+        var updated = s
+        let live = Settings.current
+        updated.pegged = live.pegged
+        updated.pinnedPaths = live.pinnedPaths
+        updated.spots = live.spots
+        updated.notes = live.notes
+        Settings.current = updated
         Settings.save()
         Localization.refresh()
         NotificationCenter.default.post(name: .snaplineSettingsChanged, object: nil)

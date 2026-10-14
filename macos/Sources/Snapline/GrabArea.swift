@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Bridges each photo to AppKit's mouse and drag and drop, so it can be
-/// dragged into any app as a real file. Each destination means one thing:
+/// dragged into any app as a real file (photos) or plain text (notes).
+/// Each destination means one thing:
 ///
 /// - Along the line: the photo moves to where you put it.
 /// - An app gets a copy, and the photo stays on the line.
@@ -59,19 +60,19 @@ struct GrabArea: NSViewRepresentable {
             guard let panel = view.window else { return }
             let local = panel.convertPoint(fromScreen: NSPoint(x: screenX, y: 0)).x
             let fraction = max(0, min(1, local / max(width, 1)))
-            if Settings.current.autoArrange {
-                let live = line.items.filter { !$0.falling }
+            if Settings.current.autoArrange || line.pageCount > 1 {
+                let live = line.visibleItems
                 var best = 0, bestD = CGFloat.greatestFiniteMagnitude
                 for i in 0..<live.count {
                     let d = abs(local - Layout.x(index: i, count: live.count, width: width))
                     if d < bestD { bestD = d; best = i }
                 }
-                if live.firstIndex(where: { $0.id == id }) != best { line.move(id, to: best) }
+                if live.firstIndex(where: { $0.id == id }) != best { line.move(id, to: line.pageStart + best) }
             } else {
                 line.setSpot(id, Double(fraction), save: false)
             }
         }
-        view.onSlideEnd = { if !Settings.current.autoArrange, let s = line.item(id)?.spot { line.setSpot(id, s, save: true) } }
+        view.onSlideEnd = { if !Settings.current.autoArrange, line.pageCount == 1, let s = line.item(id)?.spot { line.setSpot(id, s, save: true) } }
         view.menuProvider = {
             let menu = NSMenu()
             let isNote = line.isNote(id)
@@ -91,8 +92,8 @@ struct GrabArea: NSViewRepresentable {
                 menu.addItem(ClosureMenuItem(L("Open")) { line.open(id) })
                 menu.addItem(ClosureMenuItem(L("Mark up")) { line.markup(id) })
                 menu.addItem(ClosureMenuItem(L("Mark up with macOS")) { line.markupWithSystem(id) })
-                menu.addItem(ClosureMenuItem(L("Copy text")) { line.copyText(id) })
             }
+            menu.addItem(ClosureMenuItem(L("Copy text")) { line.copyText(id) })
             menu.addItem(ClosureMenuItem(L("Show in Finder")) { line.reveal(id) })
             let keep = ClosureMenuItem(L("Keep on the line")) { line.togglePin(id) }
             keep.state = (line.item(id)?.pinned ?? false) ? .on : .off
@@ -157,6 +158,7 @@ final class GrabView: NSView, NSDraggingSource {
     private var downPoint: NSPoint?
     private var downScreen: NSPoint?
     private var startedDrag = false
+    private var draggingText = false
     private var sliding = false
     private var holdTimer: Timer?
     private var didLongPress = false
@@ -254,7 +256,8 @@ final class GrabView: NSView, NSDraggingSource {
     private func beginDrag(url: URL, event: NSEvent) {
         startedDrag = true
         endPress()
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        draggingText = Notes.isNote(url)
+        let item = NSDraggingItem(pasteboardWriter: CardTransfer.dragWriter(for: url))
         item.setDraggingFrame(imageFrame(), contents: dragImage)
         let session = beginDraggingSession(with: [item], event: event, source: self)
         // Released where nothing accepts it: it flies back to the line.
@@ -283,9 +286,10 @@ final class GrabView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession,
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        if draggingText { return context == .outsideApplication ? .copy : [] }
         // Apps pick copy. Finder picks move, so a folder or the Desktop keeps
         // the file. Delete is what lets the Dock's Trash accept it.
-        context == .outsideApplication ? [.copy, .move, .delete] : []
+        return context == .outsideApplication ? [.copy, .move, .delete] : []
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {

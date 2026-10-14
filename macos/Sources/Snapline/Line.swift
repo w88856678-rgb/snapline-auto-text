@@ -44,6 +44,13 @@ struct Pegged: Identifiable, Equatable {
 @MainActor
 final class Line: ObservableObject {
     @Published private(set) var items: [Pegged] = []
+    @Published private(set) var pageIndex = 0
+    @Published var pageSize = 7 {
+        didSet {
+            if pageSize < 1 { pageSize = 1 }
+            clampPage()
+        }
+    }
     @Published private(set) var gust = 0
     @Published var copiedID: UUID?
     /// What the badge under the card says: "Copied", or "Text copied".
@@ -62,17 +69,23 @@ final class Line: ObservableObject {
     /// The paper tag and the rope, when they take the mouse.
     var extraHitRects: [CGRect] = []
 
-    var maxItems = 8
+    var maxItems = 20
     /// The width of the line on screen, from the view, for placing new photos.
     var layoutWidth: CGFloat = 0
     let persist: Bool
+    /// Restoring one card must not overwrite the saved metadata of the rest.
+    private var restoring = false
 
     var soundOn: Bool {
         get { Settings.current.soundOn }
         set { Settings.current.soundOn = newValue; Settings.save() }
     }
 
-    var liveCount: Int { items.filter { !$0.falling }.count }
+    var liveItems: [Pegged] { items.filter { !$0.falling } }
+    var liveCount: Int { liveItems.count }
+    var pageCount: Int { (max(1, liveCount) - 1) / pageSize + 1 }
+    var pageStart: Int { pageIndex * pageSize }
+    var visibleItems: [Pegged] { Array(liveItems.dropFirst(pageStart).prefix(pageSize)) }
     /// Whether something hangs that has not been copied, dragged out or opened yet.
     var hasUnused: Bool { items.contains { !$0.falling && !$0.used } }
 
@@ -84,6 +97,18 @@ final class Line: ObservableObject {
 
     func index(of id: UUID) -> Int? { items.firstIndex { $0.id == id } }
     func item(_ id: UUID) -> Pegged? { items.first { $0.id == id } }
+
+    func showPage(_ index: Int) {
+        let target = max(0, min(index, pageCount - 1))
+        if pageIndex != target { pageIndex = target }
+    }
+
+    func showPage(containing id: UUID) {
+        guard let index = liveItems.firstIndex(where: { $0.id == id }) else { return }
+        showPage(index / pageSize)
+    }
+
+    private func clampPage() { showPage(pageIndex) }
 
     // MARK: Hanging and dropping
 
@@ -97,10 +122,12 @@ final class Line: ObservableObject {
             item.spot = Layout.freeSpot(taken: items.filter { !$0.falling }.compactMap(\.spot), width: layoutWidth)
         }
         items.append(item)
-        // A full line lets the oldest photo fall off the far end. Kept photos stay.
-        while liveCount > maxItems, let oldest = items.first(where: { !$0.falling && !$0.pinned }) {
+        // Never immediately discard the item just added. If every old card is
+        // pinned, keep one temporary extra card; the next copy can replace it.
+        while liveCount > maxItems, let oldest = items.first(where: { !$0.falling && !$0.pinned && $0.id != item.id }) {
             drop(oldest.id, quietly: true)
         }
+        if !restoring { showPage(containing: item.id) }
         save()
         if !quietly { play("Tink", volume: 0.35) }
         return item.id
@@ -119,6 +146,7 @@ final class Line: ObservableObject {
         guard let i = index(of: id), !items[i].falling else { return }
         onFall?(items[i])
         items[i].falling = true
+        clampPage()
         hitRects[id] = nil
         Originals.forget(items[i].url)
         save()
@@ -183,10 +211,15 @@ final class Line: ObservableObject {
         guard let i = index(of: id) else { return }
         items[i].used = true
         let item = items[i]
-        let entry = NSPasteboardItem()
-        if let png = pngData(item.url) { entry.setData(png, forType: .png) }
-        entry.setString(item.url.absoluteString, forType: .fileURL)
-        if let note = Notes.get(item.url), !note.text.isEmpty { entry.setString(note.text, forType: .string) }
+        let entry: NSPasteboardItem
+        if let note = Notes.get(item.url) {
+            entry = CardTransfer.textItem(note.text)
+        } else {
+            entry = NSPasteboardItem()
+            entry.setData(Data(), forType: ClipboardContent.ownCopyType)
+            if let png = pngData(item.url) { entry.setData(png, forType: .png) }
+            entry.setString(item.url.absoluteString, forType: .fileURL)
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects([entry])
@@ -203,11 +236,14 @@ final class Line: ObservableObject {
         items[i].used = true
         let url = items[i].url
         Task { @MainActor in
-            let text = await Ocr.read(url)
+            let text: String?
+            if let note = Notes.get(url) { text = note.text }
+            else { text = await Ocr.read(url) }
             guard let text, !text.isEmpty else { NSSound.beep(); return }
             let pb = NSPasteboard.general
             pb.clearContents()
-            pb.setString(text, forType: .string)
+            let entry = CardTransfer.textItem(text)
+            pb.writeObjects([entry])
             self.copiedLabel = L("Text copied")
             self.copiedID = id
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
@@ -309,6 +345,17 @@ final class Line: ObservableObject {
 
     // MARK: Sticky notes
 
+    /// Clipboard notes never open an editor or take keyboard focus. Reuse a
+    /// matching live note; once it is taken down the same text may hang again.
+    @discardableResult
+    func hangCopiedText(_ text: String, in folder: URL = Inbox.folder) -> UUID? {
+        if let existing = items.first(where: { !$0.falling && Notes.get($0.url)?.text == text }) {
+            showPage(containing: existing.id)
+            return existing.id
+        }
+        return hang(Notes.create(color: "yellow", text: text, in: folder))
+    }
+
     /// A new sticky note hangs on the line, ready to be written on.
     @discardableResult
     func newNote(color: String = "yellow") -> UUID? {
@@ -347,7 +394,7 @@ final class Line: ObservableObject {
     // MARK: Persistence
 
     private func save() {
-        guard persist else { return }
+        guard persist, !restoring else { return }
         let live = items.filter { !$0.falling }
         Settings.current.pegged = live.map(\.url.path)
         Settings.current.pinnedPaths = live.filter(\.pinned).map(\.url.path)
@@ -359,16 +406,23 @@ final class Line: ObservableObject {
 
     private func restore() {
         // Everything that hung last time comes back; the line's real capacity applies from the next capture on.
+        let saved = Settings.current
         let capacity = maxItems
+        restoring = true
         maxItems = .max
-        for path in Settings.current.pegged where FileManager.default.fileExists(atPath: path) {
+        defer {
+            maxItems = capacity
+            restoring = false
+            showPage(0)
+            save()
+        }
+        for path in saved.pegged where FileManager.default.fileExists(atPath: path) {
             if let id = hang(URL(fileURLWithPath: path), quietly: true), let i = index(of: id) {
                 items[i].used = true
-                items[i].pinned = Settings.current.pinnedPaths.contains(path)
-                items[i].spot = Settings.current.spots[path] ?? items[i].spot
+                items[i].pinned = saved.pinnedPaths.contains(path)
+                items[i].spot = saved.spots[path] ?? items[i].spot
             }
         }
-        maxItems = capacity
     }
 
     // MARK: Helpers

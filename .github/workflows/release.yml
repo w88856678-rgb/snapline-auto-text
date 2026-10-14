@@ -1,106 +1,51 @@
-# Builds on every push and pull request. Pushing a tag like v1.2.0 also
-# publishes a GitHub release with the Windows and Mac files attached.
-#
-# The build jobs only read the repository. Only the release job, which runs
-# for version tags alone, may write to it. Actions are pinned to commits.
-name: Build
+# macOS validation only. Releases are created manually after review.
+# Main builds use the 1.6.6 artifact label; PR builds use dev.
+# Both keep the app bundle version numeric (1.6.6).
+name: macOS build and test
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
+env:
+  VERSION: '1.6.6'
+  APP_DISPLAY_NAME: Snapline 自动文字版
+  SIGN_IDENTITY: '-'
+
 jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Build
-        shell: pwsh
-        run: |
-          $v = if ($env:GITHUB_REF -like "refs/tags/v*") { $env:GITHUB_REF.Substring(11) } else { "0.0.0" }
-          scripts/build.ps1 -Version $v
-          scripts/build.ps1 -Portable -Installer -Version $v
-
-      - name: Name the files
-        shell: pwsh
-        run: |
-          $v = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF.Substring(11) } else { 'dev' }
-          New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item dist/portable/Snapline.exe "out/Snapline-$v-portable.exe"
-          Copy-Item dist/win-x64/Snapline.exe "out/Snapline-$v.exe"
-          Copy-Item (Get-ChildItem dist/Snapline-*-Setup.exe | Select-Object -First 1).FullName "out/Snapline-$v-Setup.exe"
-          Get-ChildItem out
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: Snapline
-          path: out/*.exe
-
   mac:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Build the app
+      - name: Test with Xcode XCTest
         working-directory: macos
         run: |
           swift --version
-          VERSION=0.0.0
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
-          export VERSION
-          bash scripts/make-dmg.sh
-          mkdir -p ../out-mac
-          cp build/Snapline-*.zip build/Snapline-*.dmg ../out-mac/
+          swift test
 
-      - name: Render a snapshot of the line
+      - name: Build the universal app
         working-directory: macos
+        run: bash scripts/make-dmg.sh
+
+      - name: Prepare artifacts
+        working-directory: macos
+        env:
+          BUILD_EVENT: ${{ github.event_name }}
         run: |
-          build/Snapline.app/Contents/MacOS/Snapline --snapshot ../out-mac/snapshot.png ../docs/samples/arabic-site.png ../docs/samples/yahoo.png ../docs/samples/arabic-dashboard.png
+          label="$VERSION"
+          if [[ "$BUILD_EVENT" == "pull_request" ]]; then label="dev"; fi
+          mkdir -p ../out-mac
+          cp "build/Snapline-${VERSION}.dmg" "../out-mac/Snapline-AutoText-${label}.dmg"
+          cp "build/Snapline-${VERSION}-mac.zip" "../out-mac/Snapline-AutoText-${label}-mac.zip"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Snapline-mac
+          name: ${{ github.event_name == 'pull_request' && 'Snapline-AutoText-dev' || 'Snapline-AutoText-1.6.6' }}
           path: out-mac/*
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, mac]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: Snapline
-          path: out
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: Snapline-mac
-          path: out-mac
-
-      - name: Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: |
-            out/*.exe
-            out-mac/*.zip
-            out-mac/*.dmg
-          generate_release_notes: true
-          body: |
-            **Windows.** **Snapline-*-Setup.exe** installs Snapline with a Start Menu entry and an uninstaller. Recommended.
-            **Snapline-*-portable.exe** runs on any Windows 10 or 11 PC without installing anything.
-            **Snapline-*.exe** is the small build and needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
-            The app is not code-signed yet, so SmartScreen may show "Windows protected your PC" the first time. Click *More info*, then *Run anyway*.
-
-            **Mac.** **Snapline-*.dmg** (or the .zip): drag Snapline into Applications. The app is not notarized yet, so macOS will refuse it once: open *System Settings → Privacy & Security* and click *Open Anyway* (on macOS 14, right-click the app and choose *Open*).
+          if-no-files-found: error

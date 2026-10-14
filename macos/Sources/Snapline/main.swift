@@ -13,5 +13,8 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
+    #if DEBUG
+    UIDiagnostics.start(delegate: delegate)
+    #endif
     withExtendedLifetime(delegate) { app.run() }
 }

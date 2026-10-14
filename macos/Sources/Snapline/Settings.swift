@@ -11,8 +11,20 @@ struct Settings: Codable {
     var notes: [String: NoteData] = [:]
     var soundOn = true
     var catchClipboard = false
+    /// Optional so settings written by the original app still decode.
+    var catchClipboardText: Bool? = nil
+    var autoHangCopiedText: Bool {
+        get { catchClipboardText ?? true }
+        set { catchClipboardText = newValue }
+    }
     var stayDownWhileUnused = false
     var takeDownAfterDrag = false
+    /// Optional backing value lets older settings decode without this preference.
+    var fullScreenOverlay: Bool? = nil
+    var showOverFullScreen: Bool {
+        get { fullScreenOverlay ?? false }
+        set { fullScreenOverlay = newValue }
+    }
     var autoArrange = false
     /// How far below the menu bar the line hangs, in points.
     var lineOffset: Double = 0
@@ -35,6 +47,11 @@ struct Settings: Codable {
     // MARK: Storage
 
     static let folder: URL = {
+        #if DEBUG
+        if let path = Bundle.main.object(forInfoDictionaryKey: "SnaplineDiagnosticDataDirectory") as? String {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Snapline", isDirectory: true)
     }()

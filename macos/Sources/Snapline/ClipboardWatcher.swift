@@ -1,28 +1,39 @@
 import AppKit
 
-/// Catches captures that only reach the clipboard: Cmd+Ctrl+Shift+4 and
-/// Cmd+Ctrl+Shift+3 copy the screenshot instead of saving it. A pure image
-/// on the clipboard, with no text or files beside it, is written to the
-/// inbox folder and hung. Anything we put on the clipboard ourselves carries
-/// a file beside the image, so it is never caught.
+/// Copied text becomes an editable note. Pure clipboard screenshots still
+/// follow the original capture path, with a short delay to avoid duplicates.
 @MainActor
 final class ClipboardWatcher {
     private var timer: Timer?
-    private var lastCount = NSPasteboard.general.changeCount
+    private let pasteboard: NSPasteboard
+    private var lastCount: Int
+    private var generation = 0
     private let onCapture: (URL, CGSize) -> Void
+    private let onText: (String) -> Void
     private let recentlyHungFromFile: (CGSize) -> Bool
-    var enabled = true
+    var enabled = true {
+        didSet { if enabled != oldValue { resetBaseline() } }
+    }
+    var textEnabled = false {
+        didSet { if textEnabled != oldValue { resetBaseline() } }
+    }
 
-    init(onCapture: @escaping (URL, CGSize) -> Void, recentlyHungFromFile: @escaping (CGSize) -> Bool) {
+    init(pasteboard: NSPasteboard = .general, onCapture: @escaping (URL, CGSize) -> Void,
+         onText: @escaping (String) -> Void, recentlyHungFromFile: @escaping (CGSize) -> Bool) {
+        self.pasteboard = pasteboard
+        self.lastCount = pasteboard.changeCount
         self.onCapture = onCapture
+        self.onText = onText
         self.recentlyHungFromFile = recentlyHungFromFile
     }
 
     func start() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 0.8, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        resetBaseline()
+        let t = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.poll() }
         }
+        t.tolerance = 0.08
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -30,17 +41,29 @@ final class ClipboardWatcher {
     func stop() {
         timer?.invalidate()
         timer = nil
+        resetBaseline()
     }
 
-    private func tick() {
-        let pb = NSPasteboard.general
+    private func resetBaseline() {
+        generation += 1
+        lastCount = pasteboard.changeCount
+    }
+
+    func poll() {
+        let pb = pasteboard
         let count = pb.changeCount
         guard count != lastCount else { return }
         lastCount = count
+        guard enabled || textEnabled, !ClipboardContent.shouldIgnore(pb) else { return }
+        if textEnabled, let text = ClipboardContent.text(from: pb) {
+            onText(text)
+        }
         guard enabled else { return }
+        let scheduledGeneration = generation
         // Let the file watcher hang a saved capture first; only catch what never reached a file.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self, NSPasteboard.general.changeCount == count else { return }
+            guard let self, self.enabled, self.generation == scheduledGeneration,
+                  pb.changeCount == count, !ClipboardContent.shouldIgnore(pb) else { return }
             self.tryCatch(pb)
         }
     }

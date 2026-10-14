@@ -14,15 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ignores the screenshot settings (macOS 27 renamed one), captures keep
     /// landing on the Desktop, and they still hang on the line.
     private var safetyWatcher: ScreenshotWatcher?
-    /// Captures that only reach the clipboard (Cmd+Ctrl+Shift+4).
+    /// Copied text and captures that only reach the clipboard.
     private var clipboard: ClipboardWatcher!
     private var signalSources: [DispatchSourceSignal] = []
     private var hotKey: HotKey?
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
 
-    /// Whether the panel is ordered in. It can be in and still tucked away
-    /// above the top edge, like an auto-hiding Dock.
+    /// Whether the line can be shown. The panel is ordered in only while revealed.
     private var isPresent = false
     /// Whether the line has slid down into view.
     private var isRevealed = false
@@ -37,20 +36,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuBarSuppressed = false
     private var clickMonitors: [Any] = []
     private var awaySince: Date?
-    /// Whether the line should be up, if nothing prevents it. A full screen
-    /// app on that screen does: the line waits until you leave full screen.
+    /// Whether the line should be up, if nothing prevents it. Full screen apps
+    /// block it unless the user allows the line over them.
     private var wanted = false
     /// Set when you open the line on purpose, so it stays up while empty.
     private var keepOpen = false
     private var lastLiveCount = 0
-    /// The screen a new capture was taken on: the line goes there.
-    private var pendingScreen: NSScreen?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyAppearance()
         let host = NSHostingView(rootView: LineView(line: line))
         host.sizingOptions = []
         panel = LinePanel(content: host)
+        applyPanelBehavior()
         panel.placeOnScreen()
         updateCapacity()
 
@@ -117,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keepOpen = true
             wanted = true
             refresh()
-            reveal(pinned: true)
+            reveal(peekFor: 6)
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 guard let self, self.line.liveCount == 0 else { return }
                 self.keepOpen = false
@@ -141,10 +139,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func settingsChanged() {
         applyAppearance()
         clipboard.enabled = Settings.current.catchClipboard
+        clipboard.textEnabled = Settings.current.autoHangCopiedText
+        applyPanelBehavior()
         panel.placeOnScreen(panel.screen)
         line.look += 1
         // Rebuild the status item title, in case the language changed.
         statusItem.button?.toolTip = "Snapline"
+        refresh()
+    }
+
+    private func applyPanelBehavior() {
+        if Settings.current.showOverFullScreen {
+            panel.collectionBehavior.insert(.fullScreenAuxiliary)
+        } else {
+            panel.collectionBehavior.remove(.fullScreenAuxiliary)
+        }
+    }
+
+    private func isBlocked(on screen: NSScreen) -> Bool {
+        !Settings.current.showOverFullScreen && FullScreen.isActive(on: screen)
     }
 
     private func applyAppearance() {
@@ -176,6 +189,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher?.stop()
         safetyWatcher?.stop()
         safetyWatcher = nil
+        #if DEBUG
+        if Bundle.main.object(forInfoDictionaryKey: "SnaplineDiagnosticDataDirectory") is String {
+            watcher = ScreenshotWatcher(
+                folder: Inbox.folder,
+                onNew: { [weak self] url in self?.hangCapture(url) },
+                onChange: { [weak self] in self?.line.prune() })
+            watcher.start()
+            return
+        }
+        #endif
         watcher = ScreenshotWatcher(
             onNew: { [weak self] url in self?.hangCapture(url) },
             onChange: { [weak self] in self?.line.prune() })
@@ -194,8 +217,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func startClipboardWatcher() {
+        var pasteboard = NSPasteboard.general
+        #if DEBUG
+        if let name = Bundle.main.object(forInfoDictionaryKey: "SnaplineDiagnosticPasteboard") as? String {
+            pasteboard = NSPasteboard(name: .init(name))
+        }
+        #endif
         clipboard = ClipboardWatcher(
+            pasteboard: pasteboard,
             onCapture: { [weak self] url, _ in self?.hangCapture(url) },
+            onText: { [weak self] text in self?.hangCopiedText(text) },
             recentlyHungFromFile: { [weak self] size in
                 guard let self else { return false }
                 return self.line.items.contains { item in
@@ -203,7 +234,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             })
         clipboard.enabled = Settings.current.catchClipboard
+        clipboard.textEnabled = Settings.current.autoHangCopiedText
         clipboard.start()
+    }
+
+    private func hangCopiedText(_ text: String) {
+        // Place it on the screen being used, including when the line is full
+        // and its item count does not grow. Do not activate the app.
+        panel.placeOnScreen()
+        updateCapacity()
+        guard line.hangCopiedText(text) != nil else { return }
+        wanted = true
+        refresh()
+        reveal(peekFor: 2.5)
     }
 
     private func setInbox(_ on: Bool) {
@@ -246,12 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func itemsChanged() {
         let live = line.liveCount
         if live > lastLiveCount {
-            panel.placeOnScreen(pendingScreen)
-            pendingScreen = nil
-            updateCapacity()
-            wanted = true
-            refresh()
-            reveal(peekFor: 2.5)
+            comeDown(on: panel.screen)
         } else if live == 0 && !keepOpen {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
                 guard let self, self.line.liveCount == 0, !self.keepOpen else { return }
@@ -262,17 +300,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastLiveCount = live
     }
 
+    /// A new capture brings the line down even when it replaces an old card
+    /// and the live item count stays unchanged.
+    private func comeDown(on screen: NSScreen?) {
+        panel.placeOnScreen(screen)
+        updateCapacity()
+        wanted = true
+        refresh()
+        reveal(peekFor: 2.5)
+    }
+
     // MARK: The capture flying to the line
 
     /// A new screenshot lifts off from where it was taken and flies to its
     /// place on the line. Without a known capture area it simply drops in.
     private func hangCapture(_ url: URL) {
         let from = captureRect(of: url)
-        if let from {
+        let screen = from.flatMap { from in
             let center = CGPoint(x: from.midX, y: from.midY)
-            pendingScreen = NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
+            return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
         }
-        guard let id = line.hang(url, flying: from != nil), let from else { return }
+        comeDown(on: screen)
+        guard let id = line.hang(url, flying: from != nil) else {
+            itemsChanged()
+            return
+        }
+        guard let from else { return }
         // Let the line come down and lay out before measuring the landing spot.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             self?.fly(id, from: from)
@@ -319,11 +372,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       width: size.width, height: size.height)
     }
 
-    /// Decides whether the panel is ordered in at all: something to show,
-    /// and no full screen app on that screen.
+    /// Decides whether the line can be shown on the current screen.
     private func refresh() {
-        let blocked = panel.screen.map(FullScreen.isActive(on:))
-            ?? LinePanel.screenUnderPointer().map(FullScreen.isActive(on:)) ?? false
+        let blocked = panel.screen.map(isBlocked(on:))
+            ?? LinePanel.screenUnderPointer().map(isBlocked(on:)) ?? false
         if wanted && !blocked {
             present()
         } else {
@@ -338,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !isPresent else { return }
         isPresent = true
         panel.alphaValue = 1
-        panel.orderFrontRegardless()
+        if isRevealed { panel.orderFrontRegardless() }
     }
 
     private func dismiss() {
@@ -363,6 +415,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard on != isRevealed else { return }
         isRevealed = on
         line.revealed = on
+        if on {
+            if isPresent { panel.orderFrontRegardless() }
+        } else {
+            // An invisible strip still appears to screen automation as the
+            // topmost window. Remove it after the slide-up animation completes.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, !self.isRevealed else { return }
+                self.panel.orderOut(nil)
+            }
+        }
         if !on {
             pinned = false
             peekUntil = .distantPast
@@ -389,7 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.placeOnScreen()
         updateCapacity()
         refresh()
-        reveal(pinned: true)
+        reveal(peekFor: 2.5)
     }
 
     private func startMouseTracking() {
@@ -450,15 +512,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let now = Date()
 
         let screenUnderPointer = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-        let inMenuBar = screenUnderPointer.map { NSMouseInRect(mouse, Self.menuBarBand(of: $0), false) } ?? false
-        if !inMenuBar { menuBarSuppressed = false }
+        let inRevealArea = screenUnderPointer.map {
+            HoverReveal.contains(mouse, screenFrame: $0.frame, visibleFrame: $0.visibleFrame,
+                                 menuBarHeight: Self.menuBarBand(of: $0).height,
+                                 lineOffset: Settings.current.lineOffset)
+        } ?? false
+        if !inRevealArea { menuBarSuppressed = false }
 
         guard isRevealed else {
-            // Resting in the menu bar brings the line down on that screen.
-            // Pushing against the top edge is part of it, and it also works
-            // when another display sits above and the pointer never stops.
-            if let screen = screenUnderPointer, inMenuBar, !menuBarSuppressed,
-               !FullScreen.isActive(on: screen) {
+            // Hover near the rope or the top edge to bring it within reach.
+            if let screen = screenUnderPointer, inRevealArea, !menuBarSuppressed,
+               !isBlocked(on: screen) {
                 let since = hotZoneSince ?? now
                 hotZoneSince = since
                 if now.timeIntervalSince(since) >= Self.revealDelay {
@@ -515,8 +579,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateCapacity() {
-        let usable = panel.frame.width - 200
-        line.maxItems = max(3, min(12, Int(usable / Layout.spacing)))
+        line.maxItems = 20
+        line.pageSize = Layout.pageSize(for: panel.frame.width)
     }
 
     // MARK: Menu bar
@@ -581,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.toggle()
         }
         toggleItem.keyEquivalent = "t"
-        toggleItem.keyEquivalentModifierMask = [.control, .option]
+        toggleItem.keyEquivalentModifierMask = hotKey?.usesFallback == true ? [.control, .option, .shift] : [.control, .option]
         menu.addItem(toggleItem)
 
         let clearItem = ClosureMenuItem(L("Take everything down")) { [weak self] in
@@ -607,6 +671,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clip.state = Settings.current.catchClipboard ? .on : .off
         clip.toolTip = L("Cmd+Ctrl+Shift+4 copies instead of saving; those hang too")
         menu.addItem(clip)
+
+        let textClip = ClosureMenuItem("复制文字自动挂上 / Auto-hang copied text") { [weak self] in
+            Settings.current.autoHangCopiedText.toggle()
+            Settings.save()
+            self?.clipboard.textEnabled = Settings.current.autoHangCopiedText
+        }
+        textClip.state = Settings.current.autoHangCopiedText ? .on : .off
+        textClip.toolTip = "复制文字后自动生成便签；双击便签可查看和编辑全文"
+        menu.addItem(textClip)
 
         let stay = ClosureMenuItem(L("Stay down until each capture is used")) {
             Settings.current.stayDownWhileUnused.toggle()

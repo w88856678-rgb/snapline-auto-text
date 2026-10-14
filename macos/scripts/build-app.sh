@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
 APP="build/Snapline.app"
-VERSION="${VERSION:-1.6.1}"
+VERSION="${VERSION:-1.6.6}"
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-Snapline 自动文字版}"
 
 # Builds one architecture and prints the binary's path.
 # The Command Line Tools for macOS 27 ship an SDK whose SwiftUI needs a macro
@@ -70,7 +71,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>Snapline</string>
-  <key>CFBundleDisplayName</key><string>Snapline</string>
+  <key>CFBundleDisplayName</key><string>${APP_DISPLAY_NAME}</string>
   <key>CFBundleIdentifier</key><string>app.snapline.Snapline</string>
   <key>CFBundleExecutable</key><string>Snapline</string>
   <key>CFBundleIconFile</key><string>Snapline</string>
@@ -92,7 +93,7 @@ PLIST
 # set), with the hardened runtime and a secure timestamp that notarization
 # requires. Without one, sign ad hoc so the app still runs locally.
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
-if [ -n "$IDENTITY" ]; then
+if [ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ]; then
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
   echo "Signed with $IDENTITY"
 else

@@ -24,10 +24,7 @@ enum Inbox {
     private static let offeredKey = "inboxOffered"
     private static let savedKey = "inboxSavedSettings"
 
-    static let folder: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Snapline/Screenshots", isDirectory: true)
-    }()
+    static let folder = Settings.folder.appendingPathComponent("Screenshots", isDirectory: true)
 
     /// The user's choice, kept across launches.
     static var isEnabled: Bool {

@@ -4,6 +4,7 @@ import Carbon
 /// key monitor, it needs no Accessibility permission.
 final class HotKey {
     private var ref: EventHotKeyRef?
+    private(set) var usesFallback = false
     private static var action: (() -> Void)?
 
     init(keyCode: Int, modifiers: Int, action: @escaping () -> Void) {
@@ -14,7 +15,14 @@ final class HotKey {
             return noErr
         }, 1, &spec, nil, nil)
         let id = EventHotKeyID(signature: OSType(0x5445_4E44), id: 1) // "TEND"
-        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &ref)
+        let result = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &ref)
+        if result != noErr {
+            // Tendedero uses the same shortcut. Keep both apps usable without
+            // asking the user to quit one just to reveal this line.
+            ref = nil
+            usesFallback = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers | shiftKey), id,
+                                              GetApplicationEventTarget(), 0, &ref) == noErr
+        }
     }
 
     deinit {

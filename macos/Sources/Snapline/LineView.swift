@@ -9,6 +9,11 @@ enum Layout {
     static let tagWidth: CGFloat = 34
     static let tagHeight: CGFloat = 26
 
+    /// Keep cards readable; the twenty retained items are browsed in pages.
+    static func pageSize(for width: CGFloat) -> Int {
+        max(1, min(12, Int(max(0, width - 200) / spacing)))
+    }
+
     /// The rope hangs as a parabola from edge to edge of the screen.
     static func sag(width: CGFloat) -> CGFloat { min(58, width * 0.036) }
 
@@ -40,16 +45,20 @@ enum Layout {
     /// Where each live photo hangs: spread evenly, or where you put it.
     @MainActor
     static func positions(for line: Line, width: CGFloat) -> [UUID: CGFloat] {
-        let live = line.items.filter { !$0.falling }
+        let live = line.visibleItems
         var result: [UUID: CGFloat] = [:]
-        if Settings.current.autoArrange || width <= 0 {
+        let half = cardWidth / 2
+        let manual = live.map { min(max(CGFloat($0.spot ?? 0.5) * width, half), max(half, width - half)) }
+        let sorted = manual.sorted()
+        // A crowded page can leave fallback spots at the centre. When cards
+        // are later removed, keep the remaining single page readable too.
+        let coincident = zip(sorted, sorted.dropFirst()).contains { abs($0 - $1) < 1 }
+        if Settings.current.autoArrange || line.pageCount > 1 || coincident || width <= 0 {
             for (i, item) in live.enumerated() { result[item.id] = x(index: i, count: live.count, width: width) }
             return result
         }
-        let half = cardWidth / 2
-        for item in live {
-            let cx = CGFloat(item.spot ?? 0.5) * width
-            result[item.id] = min(max(cx, half), max(half, width - half))
+        for (item, x) in zip(live, manual) {
+            result[item.id] = x
         }
         return result
     }
@@ -88,7 +97,12 @@ struct LineView: View {
                 MenuTag(line: line)
                     .position(x: width - 30, y: Layout.ropeY(x: width - 30, width: width) - Layout.pinAbove * 0.75 + (Layout.tagHeight + 20) / 2)
 
-                ForEach(line.items) { item in
+                if line.pageCount > 1 {
+                    PageControls(line: line)
+                        .position(x: width - 82, y: 90)
+                }
+
+                ForEach(line.visibleItems) { item in
                     let x = positions[item.id] ?? width / 2
                     let ropeY = Layout.ropeY(x: x, width: width)
                     PeggedView(item: item, line: line, width: width)
@@ -108,6 +122,40 @@ struct LineView: View {
             line.hitRects = rects
         }
     }
+}
+
+/// The menu remains at the end of the rope; page arrows sit just below it.
+private struct PageControls: View {
+    @ObservedObject var line: Line
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Button { line.showPage(line.pageIndex - 1) } label: {
+                Image(systemName: "chevron.left").frame(width: 25, height: 30)
+            }
+            .disabled(line.pageIndex == 0)
+            .accessibilityLabel("上一页 / Previous page")
+            Text("\(line.pageIndex + 1)/\(line.pageCount)")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .frame(minWidth: 30)
+                .accessibilityLabel("第 \(line.pageIndex + 1) 页，共 \(line.pageCount) 页")
+            Button { line.showPage(line.pageIndex + 1) } label: {
+                Image(systemName: "chevron.right").frame(width: 25, height: 30)
+            }
+            .disabled(line.pageIndex + 1 >= line.pageCount)
+            .accessibilityLabel("下一页 / Next page")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 5)
+        .background(.regularMaterial, in: Capsule())
+        .help("左右翻页查看全部卡片 / Browse all cards")
+        .background(GeometryReader { g in
+            Color.clear.preference(key: HitRectsKey.self, value: [Self.id: g.frame(in: .global)])
+        })
+    }
+
+    static let id = UUID()
 }
 
 private struct Hint: View {
