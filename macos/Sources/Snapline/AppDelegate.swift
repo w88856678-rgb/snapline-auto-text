@@ -239,14 +239,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func hangCopiedText(_ text: String) {
-        // Place it on the screen being used, including when the line is full
-        // and its item count does not grow. Do not activate the app.
-        panel.placeOnScreen()
-        updateCapacity()
+        prepareForCapture(on: nil)
         guard line.hangCopiedText(text) != nil else { return }
-        wanted = true
-        refresh()
-        reveal(peekFor: 2.5)
+        comeDown(on: panel.screen)
+    }
+
+    /// A brief automatic preview is not active browsing. Once the pointer
+    /// reaches a card or navigation control, keep those cards stable.
+    private func prepareForCapture(on screen: NSScreen?) {
+        if isRevealed && (line.isBrowsing || pointerOverContent(NSEvent.mouseLocation)
+                          || line.menuOpen || GrabView.isDragging || line.pressedID != nil) {
+            line.beginBrowsing()
+        } else if !isRevealed {
+            line.endBrowsing()
+        }
+        if !(isRevealed && line.isBrowsing) {
+            panel.placeOnScreen(screen)
+            updateCapacity()
+        }
     }
 
     private func setInbox(_ on: Bool) {
@@ -303,6 +313,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A new capture brings the line down even when it replaces an old card
     /// and the live item count stays unchanged.
     private func comeDown(on screen: NSScreen?) {
+        if isRevealed && line.isBrowsing {
+            wanted = true
+            refresh()
+            return
+        }
         panel.placeOnScreen(screen)
         updateCapacity()
         wanted = true
@@ -320,11 +335,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let center = CGPoint(x: from.midX, y: from.midY)
             return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
         }
-        comeDown(on: screen)
+        prepareForCapture(on: screen)
         guard let id = line.hang(url, flying: from != nil) else {
             itemsChanged()
             return
         }
+        comeDown(on: panel.screen)
         guard let from else { return }
         // Let the line come down and lay out before measuring the landing spot.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
@@ -426,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if !on {
+            line.endBrowsing()
             pinned = false
             peekUntil = .distantPast
             panel.ignoresMouseEvents = true
@@ -541,6 +558,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         updateMousePassThrough(mouse)
+        if pointerOverContent(mouse) || line.menuOpen || GrabView.isDragging || line.pressedID != nil {
+            line.beginBrowsing()
+        }
 
         // The line's zone runs from its lowest point up to the top of the
         // screen, menu bar included, so moving up never hides it.
@@ -569,13 +589,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Everywhere else, clicks go to whatever is underneath.
     private func updateMousePassThrough(_ mouse: NSPoint) {
         guard !GrabView.isDragging, !line.menuOpen else { return }
-        let local = panel.convertPoint(fromScreen: mouse)
-        let flipped = CGPoint(x: local.x, y: panel.frame.height - local.y)
-        let overSomething = line.hitRects.values.contains { $0.insetBy(dx: -4, dy: -4).contains(flipped) }
-            || line.extraHitRects.contains { $0.contains(flipped) }
+        let overSomething = pointerOverContent(mouse)
         if panel.ignoresMouseEvents == overSomething {
             panel.ignoresMouseEvents = !overSomething
         }
+    }
+
+    private func pointerOverContent(_ mouse: NSPoint) -> Bool {
+        let local = panel.convertPoint(fromScreen: mouse)
+        let flipped = CGPoint(x: local.x, y: panel.frame.height - local.y)
+        return line.hitRects.values.contains { $0.insetBy(dx: -4, dy: -4).contains(flipped) }
+            || line.extraHitRects.contains { $0.contains(flipped) }
     }
 
     private func updateCapacity() {

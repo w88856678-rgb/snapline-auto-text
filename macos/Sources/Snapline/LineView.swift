@@ -66,6 +66,7 @@ enum Layout {
 
 struct LineView: View {
     @ObservedObject var line: Line
+    @StateObject private var pageScroll = PageScrollController()
     /// The pointer is over the rope: the cursor says it can be dragged.
     @State private var overRope = false
 
@@ -97,15 +98,15 @@ struct LineView: View {
                 MenuTag(line: line)
                     .position(x: width - 30, y: Layout.ropeY(x: width - 30, width: width) - Layout.pinAbove * 0.75 + (Layout.tagHeight + 20) / 2)
 
-                if line.pageCount > 1 {
-                    PageControls(line: line)
-                        .position(x: width - 82, y: 90)
+                if line.pageCount > 1 || line.pendingCount > 0 {
+                    PageControls(line: line, pageScroll: pageScroll)
+                        .position(x: width - 70, y: 100)
                 }
 
                 ForEach(line.visibleItems) { item in
                     let x = positions[item.id] ?? width / 2
                     let ropeY = Layout.ropeY(x: x, width: width)
-                    PeggedView(item: item, line: line, width: width)
+                    PeggedView(item: item, line: line, width: width, pageScroll: pageScroll)
                         .frame(width: Layout.cardWidth, height: Layout.panelHeight - ropeY, alignment: .top)
                         .position(x: x, y: ropeY - Layout.pinAbove + (Layout.panelHeight - ropeY) / 2)
                 }
@@ -127,29 +128,47 @@ struct LineView: View {
 /// The menu remains at the end of the rope; page arrows sit just below it.
 private struct PageControls: View {
     @ObservedObject var line: Line
+    let pageScroll: PageScrollController
 
     var body: some View {
-        HStack(spacing: 3) {
-            Button { line.showPage(line.pageIndex - 1) } label: {
-                Image(systemName: "chevron.left").frame(width: 25, height: 30)
+        VStack(spacing: 7) {
+            HStack(spacing: 3) {
+                Button { line.showPage(line.pageIndex - 1) } label: {
+                    Image(systemName: "chevron.left").frame(width: 28, height: 30)
+                }
+                .disabled(line.pageIndex == 0)
+                .accessibilityLabel("更新一页 / Newer page")
+                .help("更新的内容 / Newer items")
+                Text("\(line.pageIndex + 1)/\(line.pageCount)")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .frame(minWidth: 30)
+                    .accessibilityLabel("第 \(line.pageIndex + 1) 页，共 \(line.pageCount) 页")
+                Button { line.showPage(line.pageIndex + 1) } label: {
+                    Image(systemName: "chevron.right").frame(width: 28, height: 30)
+                }
+                .disabled(line.pageIndex + 1 >= line.pageCount)
+                .accessibilityLabel("更早一页 / Older page")
+                .help("更早的内容 / Older items")
             }
-            .disabled(line.pageIndex == 0)
-            .accessibilityLabel("上一页 / Previous page")
-            Text("\(line.pageIndex + 1)/\(line.pageCount)")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .frame(minWidth: 30)
-                .accessibilityLabel("第 \(line.pageIndex + 1) 页，共 \(line.pageCount) 页")
-            Button { line.showPage(line.pageIndex + 1) } label: {
-                Image(systemName: "chevron.right").frame(width: 25, height: 30)
+            .padding(.horizontal, 5)
+            .background(.regularMaterial, in: Capsule())
+
+            Button { line.showLatest() } label: {
+                Label(line.pendingCount > 0 ? "更新 \(line.pendingCount) 项" : "最近复制",
+                      systemImage: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 112, height: 28)
             }
-            .disabled(line.pageIndex + 1 >= line.pageCount)
-            .accessibilityLabel("下一页 / Next page")
+            .background(line.pendingCount > 0 ? Color.accentColor.opacity(0.17) : Color.clear, in: Capsule())
+            .background(.regularMaterial, in: Capsule())
+            .accessibilityLabel(line.pendingCount > 0 ? "查看 \(line.pendingCount) 项更新，定位最近复制 / Recent copy" : "定位最近复制 / Recent copy")
+            .help("查看最近复制的内容；浏览时新内容不会抢页 / Show the most recent copy")
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 5)
-        .background(.regularMaterial, in: Capsule())
-        .help("左右翻页查看全部卡片 / Browse all cards")
+        .background(PageScrollRegion(controller: pageScroll, isEnabled: line.revealed && line.pageCount > 1) { step in
+            line.showPage(line.pageIndex + step)
+        })
         .background(GeometryReader { g in
             Color.clear.preference(key: HitRectsKey.self, value: [Self.id: g.frame(in: .global)])
         })

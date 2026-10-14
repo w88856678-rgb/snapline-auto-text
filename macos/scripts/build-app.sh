@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
 APP="build/Snapline.app"
-VERSION="${VERSION:-1.6.6}"
+VERSION="${VERSION:-1.6.7}"
 APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-Snapline 自动文字版}"
 
 # Builds one architecture and prints the binary's path.

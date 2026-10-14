@@ -6,6 +6,7 @@ struct PeggedView: View {
     let item: Pegged
     @ObservedObject var line: Line
     let width: CGFloat
+    let pageScroll: PageScrollController
 
     @State private var swing: Double = 0
     @State private var arrived = false
@@ -100,7 +101,12 @@ struct PeggedView: View {
                     .scaleEffect(hovering ? 1 : 0.6)
                     .allowsHitTesting(false)
             }
-            .overlay(GrabArea(item: item, line: line, width: width))
+            .overlay(GrabArea(item: item, line: line, width: width, onScroll: { event in
+                guard line.revealed, line.pageCount > 1 else { return false }
+                return pageScroll.handle(event) { step in
+                    line.showPage(line.pageIndex + step)
+                }
+            }))
             .overlay(alignment: .bottom) {
                 if copied {
                     Label(line.copiedLabel, systemImage: "checkmark")
@@ -111,6 +117,15 @@ struct PeggedView: View {
                         .glassFrame(capsule: true)
                         .offset(y: 16)
                         .transition(.opacity.combined(with: .offset(y: -4)))
+                } else if line.latestCaptureID == item.id {
+                    Text("最近复制")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.regularMaterial, in: Capsule())
+                        .offset(y: 14)
+                        .allowsHitTesting(false)
                 }
             }
             .animation(.easeOut(duration: 0.18), value: hovering)

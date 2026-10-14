@@ -9,6 +9,8 @@ struct Settings: Codable {
     var spots: [String: Double] = [:]
     /// Sticky notes, by the path of the picture each is drawn into.
     var notes: [String: NoteData] = [:]
+    /// Stable across launches, unlike the in-memory card UUID.
+    var recentCopyPath: String? = nil
     var soundOn = true
     var catchClipboard = false
     /// Optional so settings written by the original app still decode.

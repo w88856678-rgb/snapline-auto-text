@@ -126,6 +126,7 @@ struct SettingsView: View {
         updated.pinnedPaths = live.pinnedPaths
         updated.spots = live.spots
         updated.notes = live.notes
+        updated.recentCopyPath = live.recentCopyPath
         Settings.current = updated
         Settings.save()
         Localization.refresh()

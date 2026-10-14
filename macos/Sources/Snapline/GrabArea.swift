@@ -17,6 +17,7 @@ struct GrabArea: NSViewRepresentable {
     let item: Pegged
     let line: Line
     let width: CGFloat
+    var onScroll: (NSEvent) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> GrabView {
         let view = GrabView()
@@ -34,6 +35,7 @@ struct GrabArea: NSViewRepresentable {
         let width = width
         view.url = item.url
         view.dragImage = item.thumb
+        view.onScroll = onScroll
         view.onClick = { line.copy(id) }
         view.onDoubleClick = { line.open(id) }
         view.onDragStart = { line.draggingID = id }
@@ -67,7 +69,7 @@ struct GrabArea: NSViewRepresentable {
                     let d = abs(local - Layout.x(index: i, count: live.count, width: width))
                     if d < bestD { bestD = d; best = i }
                 }
-                if live.firstIndex(where: { $0.id == id }) != best { line.move(id, to: line.pageStart + best) }
+                if live.firstIndex(where: { $0.id == id }) != best { line.moveVisible(id, to: best) }
             } else {
                 line.setSpot(id, Double(fraction), save: false)
             }
@@ -153,6 +155,7 @@ final class GrabView: NSView, NSDraggingSource {
     var onPressChange: (Bool) -> Void = { _ in }
     var onSlide: (CGFloat) -> Void = { _ in }
     var onSlideEnd: () -> Void = {}
+    var onScroll: (NSEvent) -> Bool = { _ in false }
     var menuProvider: () -> NSMenu = { NSMenu() }
 
     private var downPoint: NSPoint?
@@ -170,6 +173,10 @@ final class GrabView: NSView, NSDraggingSource {
     private static let pullAway: CGFloat = 44
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func scrollWheel(with event: NSEvent) {
+        if !onScroll(event) { super.scrollWheel(with: event) }
+    }
 
     static let cornerHitSize: CGFloat = 26
 

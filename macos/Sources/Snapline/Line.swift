@@ -48,9 +48,20 @@ final class Line: ObservableObject {
     @Published var pageSize = 7 {
         didSet {
             if pageSize < 1 { pageSize = 1 }
+            if pageSize != oldValue { resizePages() }
             clampPage()
         }
     }
+    /// Captures must not move the cards a person is looking at or reaching for.
+    @Published private(set) var isBrowsing = false
+    /// New cards waiting behind the "Latest" button. Counts cards, not copy events.
+    @Published private(set) var pendingCount = 0
+    /// Freeze page membership, rather than numeric offsets: eviction elsewhere
+    /// on the line must not slide a different card underneath the pointer.
+    @Published private var browsingPages: [[UUID]]? = nil
+    private var pendingIDs: Set<UUID> = []
+    private var overflowID: UUID?
+    @Published private(set) var latestCaptureID: UUID? = nil
     @Published private(set) var gust = 0
     @Published var copiedID: UUID?
     /// What the badge under the card says: "Copied", or "Text copied".
@@ -83,9 +94,13 @@ final class Line: ObservableObject {
 
     var liveItems: [Pegged] { items.filter { !$0.falling } }
     var liveCount: Int { liveItems.count }
-    var pageCount: Int { (max(1, liveCount) - 1) / pageSize + 1 }
+    var pageCount: Int { max(1, pages.count) }
     var pageStart: Int { pageIndex * pageSize }
-    var visibleItems: [Pegged] { Array(liveItems.dropFirst(pageStart).prefix(pageSize)) }
+    var visibleItems: [Pegged] {
+        let current = pages
+        guard current.indices.contains(pageIndex) else { return [] }
+        return current[pageIndex]
+    }
     /// Whether something hangs that has not been copied, dragged out or opened yet.
     var hasUnused: Bool { items.contains { !$0.falling && !$0.used } }
 
@@ -98,17 +113,99 @@ final class Line: ObservableObject {
     func index(of id: UUID) -> Int? { items.firstIndex { $0.id == id } }
     func item(_ id: UUID) -> Pegged? { items.first { $0.id == id } }
 
+    private var pages: [[Pegged]] {
+        let live = liveItems
+        if let browsingPages {
+            let byID = Dictionary(uniqueKeysWithValues: live.map { ($0.id, $0) })
+            return browsingPages.map { $0.compactMap { byID[$0] } }
+        }
+        let recent = Array(live.reversed())
+        return stride(from: 0, to: recent.count, by: pageSize).map {
+            Array(recent.dropFirst($0).prefix(pageSize))
+        }
+    }
+
+    private func snapshotPages() {
+        let recent = Array(liveItems.reversed())
+        browsingPages = stride(from: 0, to: recent.count, by: pageSize).map {
+            Array(recent.dropFirst($0).prefix(pageSize)).map(\.id)
+        }
+    }
+
+    /// Hovering or navigating starts an uninterrupted visit to these cards.
+    func beginBrowsing() {
+        if browsingPages == nil { snapshotPages() }
+        isBrowsing = true
+    }
+
+    /// Hiding releases eviction protection, but ordinary show/hide keeps the
+    /// same page. The next capture may follow the newest item again.
+    func endBrowsing() { isBrowsing = false }
+
+    /// Explicitly leave the saved browsing position and look at fresh captures.
+    func showLatest() {
+        browsingPages = nil
+        pendingIDs.removeAll()
+        pendingCount = 0
+        pageIndex = 0
+        if !liveItems.contains(where: { $0.id == latestCaptureID }) {
+            latestCaptureID = liveItems.last?.id
+        }
+        if let latestCaptureID { showPage(containing: latestCaptureID) }
+        if isBrowsing { snapshotPages() }
+    }
+
     func showPage(_ index: Int) {
+        beginBrowsing()
+        selectPage(index)
+    }
+
+    private func selectPage(_ index: Int) {
         let target = max(0, min(index, pageCount - 1))
         if pageIndex != target { pageIndex = target }
     }
 
     func showPage(containing id: UUID) {
-        guard let index = liveItems.firstIndex(where: { $0.id == id }) else { return }
-        showPage(index / pageSize)
+        guard let index = pages.firstIndex(where: { $0.contains { $0.id == id } }) else { return }
+        selectPage(index)
     }
 
-    private func clampPage() { showPage(pageIndex) }
+    private func clampPage() { selectPage(pageIndex) }
+
+    private func resizePages() {
+        guard browsingPages != nil else { return }
+        let anchor = visibleItems.first?.id
+        // A real screen-size change is an explicit reflow. Keep its first
+        // visible card in view and keep unseen captures behind "Latest".
+        let knownIDs = Set(browsingPages?.flatMap { $0 } ?? [])
+        let known = Array(liveItems.reversed()).filter { knownIDs.contains($0.id) }
+        browsingPages = stride(from: 0, to: known.count, by: pageSize).map {
+            Array(known.dropFirst($0).prefix(pageSize)).map(\.id)
+        }
+        if let anchor { showPage(containing: anchor) }
+    }
+
+    private func removeFromPages(_ id: UUID) {
+        guard let saved = browsingPages else { return }
+        let anchor = visibleItems.first(where: { $0.id != id })?.id
+        browsingPages = saved.map { $0.filter { $0 != id } }.filter { !$0.isEmpty }
+        if let anchor { showPage(containing: anchor) }
+        clampPage()
+    }
+
+    private func markPending(_ id: UUID) {
+        pendingIDs.insert(id)
+        pendingCount = pendingIDs.count
+    }
+
+    private func followCapture(_ id: UUID) {
+        latestCaptureID = id
+        if isBrowsing && pages.contains(where: { !$0.isEmpty }) {
+            markPending(id)
+        } else {
+            showLatest()
+        }
+    }
 
     // MARK: Hanging and dropping
 
@@ -116,6 +213,7 @@ final class Line: ObservableObject {
     func hang(_ url: URL, quietly: Bool = false, flying: Bool = false) -> UUID? {
         guard !items.contains(where: { $0.url == url && !$0.falling }),
               let thumb = makeThumbnail(url) else { return nil }
+        let protected = isBrowsing ? Set(visibleItems.map(\.id)) : []
         var item = Pegged(url: url, thumb: thumb)
         item.flying = flying
         if !Settings.current.autoArrange {
@@ -124,10 +222,20 @@ final class Line: ObservableObject {
         items.append(item)
         // Never immediately discard the item just added. If every old card is
         // pinned, keep one temporary extra card; the next copy can replace it.
-        while liveCount > maxItems, let oldest = items.first(where: { !$0.falling && !$0.pinned && $0.id != item.id }) {
-            drop(oldest.id, quietly: true)
+        while liveCount > maxItems {
+            let oldest = items.first {
+                !$0.falling && !$0.pinned && $0.id != item.id && !protected.contains($0.id)
+            }
+            // Even if the previous temporary extra is on screen, never keep
+            // accumulating extra cards when all ordinary slots are protected.
+            let previousExtra = overflowID.flatMap { previous in
+                items.first { $0.id == previous && !$0.falling && !$0.pinned && $0.id != item.id }
+            }
+            guard let victim = oldest ?? previousExtra else { break }
+            drop(victim.id, quietly: true)
         }
-        if !restoring { showPage(containing: item.id) }
+        overflowID = liveCount > maxItems ? item.id : nil
+        if !restoring { followCapture(item.id) }
         save()
         if !quietly { play("Tink", volume: 0.35) }
         return item.id
@@ -146,6 +254,10 @@ final class Line: ObservableObject {
         guard let i = index(of: id), !items[i].falling else { return }
         onFall?(items[i])
         items[i].falling = true
+        removeFromPages(id)
+        pendingIDs.remove(id)
+        pendingCount = pendingIDs.count
+        if overflowID == id { overflowID = nil }
         clampPage()
         hitRects[id] = nil
         Originals.forget(items[i].url)
@@ -188,6 +300,27 @@ final class Line: ObservableObject {
             items.append(item)
         }
         live = []
+        if let saved = browsingPages {
+            let order = Dictionary(uniqueKeysWithValues: liveItems.reversed().enumerated().map { ($0.element.id, $0.offset) })
+            browsingPages = saved.map { $0.sorted { order[$0, default: .max] < order[$1, default: .max] } }
+        }
+        save()
+    }
+
+    /// Reorder a displayed page without exposing its reversed, possibly frozen
+    /// pagination order to the drag handler. Non-visible cards keep their slots.
+    func moveVisible(_ id: UUID, to visibleIndex: Int) {
+        beginBrowsing()
+        var ordered = visibleItems
+        guard let from = ordered.firstIndex(where: { $0.id == id }) else { return }
+        let moving = ordered.remove(at: from)
+        ordered.insert(moving, at: max(0, min(visibleIndex, ordered.count)))
+        let memberIDs = Set(ordered.map(\.id))
+        let slots = items.indices.filter { !items[$0].falling && memberIDs.contains(items[$0].id) }
+        for (slot, card) in zip(slots, ordered.reversed()) { items[slot] = card }
+        if browsingPages?.indices.contains(pageIndex) == true {
+            browsingPages?[pageIndex] = ordered.map(\.id)
+        }
         save()
     }
 
@@ -350,7 +483,8 @@ final class Line: ObservableObject {
     @discardableResult
     func hangCopiedText(_ text: String, in folder: URL = Inbox.folder) -> UUID? {
         if let existing = items.first(where: { !$0.falling && Notes.get($0.url)?.text == text }) {
-            showPage(containing: existing.id)
+            followCapture(existing.id)
+            save()
             return existing.id
         }
         return hang(Notes.create(color: "yellow", text: text, in: folder))
@@ -396,6 +530,9 @@ final class Line: ObservableObject {
     private func save() {
         guard persist, !restoring else { return }
         let live = items.filter { !$0.falling }
+        let recent = live.first(where: { $0.id == latestCaptureID }) ?? live.last
+        latestCaptureID = recent?.id
+        Settings.current.recentCopyPath = recent?.url.path
         Settings.current.pegged = live.map(\.url.path)
         Settings.current.pinnedPaths = live.filter(\.pinned).map(\.url.path)
         var spots: [String: Double] = [:]
@@ -413,7 +550,9 @@ final class Line: ObservableObject {
         defer {
             maxItems = capacity
             restoring = false
-            showPage(0)
+            overflowID = liveCount > maxItems ? liveItems.last(where: { !$0.pinned })?.id : nil
+            latestCaptureID = liveItems.first(where: { $0.url.path == saved.recentCopyPath })?.id ?? liveItems.last?.id
+            showLatest()
             save()
         }
         for path in saved.pegged where FileManager.default.fileExists(atPath: path) {

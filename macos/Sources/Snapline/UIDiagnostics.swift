@@ -21,6 +21,10 @@ enum UIDiagnostics {
                         values["pageSize"] = line.pageSize
                         values["pageCount"] = line.pageCount
                         values["visibleCount"] = line.visibleItems.count
+                        values["visibleIDs"] = line.visibleItems.map { $0.id.uuidString }
+                        values["isBrowsing"] = line.isBrowsing
+                        values["pendingCount"] = line.pendingCount
+                        values["latestCaptureID"] = line.latestCaptureID?.uuidString
                         values["hitRectCount"] = line.hitRects.count
                         values["unused"] = line.hasUnused
                     }
