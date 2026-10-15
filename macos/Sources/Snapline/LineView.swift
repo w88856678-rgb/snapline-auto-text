@@ -137,33 +137,33 @@ private struct PageControls: View {
                     Image(systemName: "chevron.left").frame(width: 28, height: 30)
                 }
                 .disabled(line.pageIndex == 0)
-                .accessibilityLabel("更新一页 / Newer page")
-                .help("更新的内容 / Newer items")
+                .accessibilityLabel(L("Newer page"))
+                .help(L("Newer items"))
                 Text("\(line.pageIndex + 1)/\(line.pageCount)")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .monospacedDigit()
                     .frame(minWidth: 30)
-                    .accessibilityLabel("第 \(line.pageIndex + 1) 页，共 \(line.pageCount) 页")
+                    .accessibilityLabel(String(format: L("Page %d of %d"), line.pageIndex + 1, line.pageCount))
                 Button { line.showPage(line.pageIndex + 1) } label: {
                     Image(systemName: "chevron.right").frame(width: 28, height: 30)
                 }
                 .disabled(line.pageIndex + 1 >= line.pageCount)
-                .accessibilityLabel("更早一页 / Older page")
-                .help("更早的内容 / Older items")
+                .accessibilityLabel(L("Older page"))
+                .help(L("Older items"))
             }
             .padding(.horizontal, 5)
             .background(.regularMaterial, in: Capsule())
 
             Button { line.showLatest() } label: {
-                Label(line.pendingCount > 0 ? "更新 \(line.pendingCount) 项" : "最近复制",
+                Label(line.pendingCount > 0 ? String(format: L("%d updates"), line.pendingCount) : L("Recent copy"),
                       systemImage: "clock.arrow.circlepath")
                     .font(.system(size: 11, weight: .medium))
                     .frame(width: 112, height: 28)
             }
             .background(line.pendingCount > 0 ? Color.accentColor.opacity(0.17) : Color.clear, in: Capsule())
             .background(.regularMaterial, in: Capsule())
-            .accessibilityLabel(line.pendingCount > 0 ? "查看 \(line.pendingCount) 项更新，定位最近复制 / Recent copy" : "定位最近复制 / Recent copy")
-            .help("查看最近复制的内容；浏览时新内容不会抢页 / Show the most recent copy")
+            .accessibilityLabel(line.pendingCount > 0 ? String(format: L("Show %d updates and locate the recent copy"), line.pendingCount) : L("Locate the recent copy"))
+            .help(L("Show the most recent copy; new items do not interrupt browsing"))
         }
         .buttonStyle(.plain)
         .background(PageScrollRegion(controller: pageScroll, isEnabled: line.revealed && line.pageCount > 1) { step in

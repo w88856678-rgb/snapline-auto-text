@@ -3,6 +3,15 @@ import XCTest
 @testable import Snapline
 
 final class SettingsTests: XCTestCase {
+    func testNewInstallEnablesImagesAndExistingImageChoiceIsPreserved() throws {
+        XCTAssertTrue(Settings().catchClipboard)
+        var settings = Settings()
+        settings.catchClipboard = false
+        let decoded = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.catchClipboard)
+        XCTAssertTrue(decoded.autoHangCopiedText)
+    }
+
     func testLegacySettingsKeepExistingContentAndEnableCopiedTextByDefault() throws {
         var original = Settings()
         original.pegged = ["/tmp/existing-screenshot.png", "/tmp/existing-note.png"]

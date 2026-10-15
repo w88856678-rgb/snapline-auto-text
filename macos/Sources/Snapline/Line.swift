@@ -207,6 +207,15 @@ final class Line: ObservableObject {
         }
     }
 
+    /// Reusing an existing capture still makes this copy the latest event.
+    @discardableResult
+    func recapture(_ id: UUID) -> Bool {
+        guard liveItems.contains(where: { $0.id == id }) else { return false }
+        followCapture(id)
+        save()
+        return true
+    }
+
     // MARK: Hanging and dropping
 
     @discardableResult
@@ -353,7 +362,7 @@ final class Line: ObservableObject {
             if let png = pngData(item.url) { entry.setData(png, forType: .png) }
             entry.setString(item.url.absoluteString, forType: .fileURL)
         }
-        let pb = NSPasteboard.general
+        let pb = ClipboardContent.transferPasteboard
         pb.clearContents()
         pb.writeObjects([entry])
         copiedLabel = L("Copied")
@@ -373,7 +382,7 @@ final class Line: ObservableObject {
             if let note = Notes.get(url) { text = note.text }
             else { text = await Ocr.read(url) }
             guard let text, !text.isEmpty else { NSSound.beep(); return }
-            let pb = NSPasteboard.general
+            let pb = ClipboardContent.transferPasteboard
             pb.clearContents()
             let entry = CardTransfer.textItem(text)
             pb.writeObjects([entry])
@@ -483,8 +492,7 @@ final class Line: ObservableObject {
     @discardableResult
     func hangCopiedText(_ text: String, in folder: URL = Inbox.folder) -> UUID? {
         if let existing = items.first(where: { !$0.falling && Notes.get($0.url)?.text == text }) {
-            followCapture(existing.id)
-            save()
+            recapture(existing.id)
             return existing.id
         }
         return hang(Notes.create(color: "yellow", text: text, in: folder))

@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var safetyWatcher: ScreenshotWatcher?
     /// Copied text and captures that only reach the clipboard.
     private var clipboard: ClipboardWatcher!
+    private let recentFileImages = RecentImageCaptures()
     private var signalSources: [DispatchSourceSignal] = []
     private var hotKey: HotKey?
     private var cancellables = Set<AnyCancellable>()
@@ -225,13 +226,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         #endif
         clipboard = ClipboardWatcher(
             pasteboard: pasteboard,
-            onCapture: { [weak self] url, _ in self?.hangCapture(url) },
+            onCapture: { [weak self] url, _ in self?.hangCapture(url, fromClipboard: true) },
             onText: { [weak self] text in self?.hangCopiedText(text) },
-            recentlyHungFromFile: { [weak self] size in
-                guard let self else { return false }
-                return self.line.items.contains { item in
-                    !item.falling && Date().timeIntervalSince(item.hungAt) < 5 && pixelSize(item.url) == size
-                }
+            recentlyHungFromFile: { [weak self] image in
+                guard let self, let url = self.recentFileImages.matchingURL(image, source: .file),
+                      let item = self.line.liveItems.first(where: { $0.url == url }),
+                      ClipboardImage(contentsOf: url)?.fingerprint == image.fingerprint else { return false }
+                self.prepareForCapture(on: nil)
+                self.line.recapture(item.id)
+                self.comeDown(on: self.panel.screen)
+                return true
             })
         clipboard.enabled = Settings.current.catchClipboard
         clipboard.textEnabled = Settings.current.autoHangCopiedText
@@ -329,7 +333,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// A new screenshot lifts off from where it was taken and flies to its
     /// place on the line. Without a known capture area it simply drops in.
-    private func hangCapture(_ url: URL) {
+    private func hangCapture(_ url: URL, fromClipboard: Bool = false) {
+        let image = ClipboardImage(contentsOf: url)
+        if !fromClipboard, let image,
+           let existingURL = recentFileImages.matchingURL(image, source: .clipboard),
+           line.liveItems.contains(where: { $0.url == existingURL }),
+           ClipboardImage(contentsOf: existingURL)?.fingerprint == image.fingerprint {
+            // A saved screenshot may arrive after the clipboard snapshot.
+            // Keep the existing card and the newer clipboard browsing target.
+            return
+        }
         let from = captureRect(of: url)
         let screen = from.flatMap { from in
             let center = CGPoint(x: from.midX, y: from.midY)
@@ -339,6 +352,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let id = line.hang(url, flying: from != nil) else {
             itemsChanged()
             return
+        }
+        if let image {
+            recentFileImages.record(image, url: url, source: fromClipboard ? .clipboard : .file)
         }
         comeDown(on: panel.screen)
         guard let from else { return }
@@ -687,22 +703,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         inbox.toolTip = L("Screenshots hang instantly and skip the Desktop")
         menu.addItem(inbox)
 
-        let clip = ClosureMenuItem(L("Catch clipboard captures")) { [weak self] in
+        let clip = ClosureMenuItem(L("Auto-hang copied images")) { [weak self] in
             Settings.current.catchClipboard.toggle()
             Settings.save()
             self?.clipboard.enabled = Settings.current.catchClipboard
         }
         clip.state = Settings.current.catchClipboard ? .on : .off
-        clip.toolTip = L("Cmd+Ctrl+Shift+4 copies instead of saving; those hang too")
+        clip.toolTip = L("Copied images, screenshots, and single image files from Finder hang automatically")
         menu.addItem(clip)
 
-        let textClip = ClosureMenuItem("复制文字自动挂上 / Auto-hang copied text") { [weak self] in
+        let textClip = ClosureMenuItem(L("Auto-hang copied text")) { [weak self] in
             Settings.current.autoHangCopiedText.toggle()
             Settings.save()
             self?.clipboard.textEnabled = Settings.current.autoHangCopiedText
         }
         textClip.state = Settings.current.autoHangCopiedText ? .on : .off
-        textClip.toolTip = "复制文字后自动生成便签；双击便签可查看和编辑全文"
+        textClip.toolTip = L("Copied text becomes a note; double-click to read and edit the full text")
         menu.addItem(textClip)
 
         let stay = ClosureMenuItem(L("Stay down until each capture is used")) {

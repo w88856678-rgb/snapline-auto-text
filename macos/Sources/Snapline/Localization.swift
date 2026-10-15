@@ -11,7 +11,7 @@ func L(_ english: String) -> String {
 }
 
 enum Localization {
-    /// "en" or "ar".
+    /// "en", "ar", or "zh-Hans".
     nonisolated(unsafe) static var language: String = resolve()
     static var isRTL: Bool { language == "ar" }
 
@@ -23,11 +23,22 @@ enum Localization {
     }
 
     private static func resolve() -> String {
-        let chosen = Settings.current.language
-        if chosen == "en" || chosen == "ar" { return chosen }
-        for preferred in Locale.preferredLanguages {
-            if preferred.hasPrefix("ar") { return "ar" }
-            if preferred.hasPrefix("en") { return "en" }
+        resolve(chosen: Settings.current.language, preferredLanguages: Locale.preferredLanguages)
+    }
+
+    /// Kept separate from saved preferences so language matching can be
+    /// checked without reading or changing the user's settings.
+    static func resolve(chosen: String, preferredLanguages: [String]) -> String {
+        if ["en", "ar", "zh-Hans"].contains(chosen) { return chosen }
+        for preferred in preferredLanguages {
+            let base = preferred.replacingOccurrences(of: "_", with: "-")
+                .lowercased().split(separator: "-").first
+            switch base {
+            case "zh": return "zh-Hans"
+            case "ar": return "ar"
+            case "en": return "en"
+            default: continue
+            }
         }
         return "en"
     }

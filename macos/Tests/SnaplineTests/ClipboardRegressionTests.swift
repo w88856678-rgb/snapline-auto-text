@@ -24,8 +24,8 @@ final class ClipboardRegressionTests: XCTestCase {
         let watcher = ClipboardWatcher(pasteboard: pasteboard,
                                        onCapture: { _, _ in XCTFail("The image interception must prevent writing into the real Inbox") },
                                        onText: { _ in XCTFail("A pure image must not produce a text note") },
-                                       recentlyHungFromFile: { size in
-                                           examined.append(size)
+                                       recentlyHungFromFile: { image in
+                                           examined.append(image.size)
                                            // Stop after image validation, before Inbox.newCapturePath().
                                            return true
                                        })

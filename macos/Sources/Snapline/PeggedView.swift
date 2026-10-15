@@ -118,7 +118,7 @@ struct PeggedView: View {
                         .offset(y: 16)
                         .transition(.opacity.combined(with: .offset(y: -4)))
                 } else if line.latestCaptureID == item.id {
-                    Text("最近复制")
+                    Text(L("Recent copy"))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 7)

@@ -54,7 +54,7 @@ struct SettingsView: View {
             Section(L("The line")) {
                 Toggle(L("Stay down until each capture is used"), isOn: $s.stayDownWhileUnused)
                 Toggle(L("Take down after dragging into an app"), isOn: $s.takeDownAfterDrag)
-                Toggle("在全屏应用上显示 / Show over full screen apps", isOn: $s.showOverFullScreen)
+                Toggle(L("Show over full screen apps"), isOn: $s.showOverFullScreen)
                 Toggle(L("Arrange photos evenly along the line"), isOn: $s.autoArrange)
                 HStack {
                     Text(L("Distance from the top of the screen"))
@@ -76,12 +76,12 @@ struct SettingsView: View {
                     Text(L("Follow macOS")).tag("auto"); Text(L("Light")).tag("light"); Text(L("Dark")).tag("dark")
                 }
                 Picker(L("Language"), selection: $s.language) {
-                    Text(L("Follow macOS")).tag("auto"); Text("English").tag("en"); Text("العربية").tag("ar")
+                    Text(L("Follow macOS")).tag("auto"); Text("简体中文").tag("zh-Hans"); Text("English").tag("en"); Text("العربية").tag("ar")
                 }
             }
             Section(L("Captures")) {
-                Toggle("复制文字自动挂上 / Auto-hang copied text", isOn: $s.autoHangCopiedText)
-                Toggle(L("Catch clipboard captures"), isOn: $s.catchClipboard)
+                Toggle(L("Auto-hang copied text"), isOn: $s.autoHangCopiedText)
+                Toggle(L("Auto-hang copied images"), isOn: $s.catchClipboard)
                 Toggle(L("Handle screenshots"), isOn: Binding(get: { Inbox.isEnabled }, set: { on in
                     NotificationCenter.default.post(name: .snaplineInboxToggle, object: on)
                 }))

@@ -12,7 +12,7 @@ struct Settings: Codable {
     /// Stable across launches, unlike the in-memory card UUID.
     var recentCopyPath: String? = nil
     var soundOn = true
-    var catchClipboard = false
+    var catchClipboard = true
     /// Optional so settings written by the original app still decode.
     var catchClipboardText: Bool? = nil
     var autoHangCopiedText: Bool {
@@ -37,7 +37,7 @@ struct Settings: Codable {
     var bows = true
     /// auto, light or dark.
     var appearance = "auto"
-    /// auto, en or ar.
+    /// auto, en, ar or zh-Hans.
     var language = "auto"
     var welcomed = false
 

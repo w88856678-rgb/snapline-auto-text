@@ -6,17 +6,17 @@
 
 <p align="center"><strong>把临时要用的文字和图片，挂在手边。</strong></p>
 
-<p align="center">macOS 14+ · Apple Silicon 与 Intel · 免费开源</p>
+<p align="center">macOS 14+ · 简体中文界面 · Apple Silicon 与 Intel · 免费开源</p>
 
 <p align="center">
-  <a href="https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.7/Snapline-AutoText-1.6.7.dmg"><strong>下载 Mac 版 · 1.6.7</strong></a>
+  <a href="https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.8/Snapline-AutoText-1.6.8.dmg"><strong>下载 Mac 版 · 1.6.8</strong></a>
   &nbsp;·&nbsp;
   <a href="docs/usage.zh-CN.md">使用指南</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/w88856678-rgb/snapline-auto-text/releases/latest">其他下载与版本更新</a>
 </p>
 
-Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。查资料时复制的段落、写文档时要参考的截图，都可以挂在同一条晾衣绳上：复制文字自动生成便签，需要时展开取用，用完后自动收起。
+Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。查资料时复制的段落、写文档时要参考的截图，都可以挂在同一条晾衣绳上：复制文字自动生成便签，复制图片也会自动挂上，需要时展开取用，用完后自动收起。
 
 ![Snapline AutoText 界面示例：文字便签和图片挂在屏幕顶部，最近复制的内容带有标签](docs/autotext-recent.png)
 
@@ -33,6 +33,7 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 | 核心功能 | 日常怎么用 |
 | --- | --- |
 | **复制文字自动挂便签** | 正常按 ⌘C 就能收集段落；双击便签可查看和编辑全文。 |
+| **复制图片自动挂上** | 复制网页图片、截图，或 Finder 中的单张图片文件，自动挂到晾衣架上；连续复制也能各自留下。 |
 | **完整原文取用** | 单击便签复制，再按 ⌘V 粘贴，保留换行和 emoji；右键也可复制文字。 |
 | **图文共用挂架** | 文字便签与截图、图片一起参考；常用内容可以右键固定。 |
 | **最近入口与分页浏览** | 最近内容排在前面，用标签找到刚刚复制的那项，也能翻看更早内容。 |
@@ -41,11 +42,11 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 
 ## 三步开始使用
 
-1. **复制**：在网页、文档或聊天窗口复制文字，它会自动挂成便签。
+1. **复制**：在网页、文档或聊天窗口复制文字或图片，内容会自动挂上。
 2. **找到**：将鼠标停在屏幕顶部区域展开挂架，找到需要的内容。
-3. **粘贴**：单击文字便签，在目标应用按 ⌘V，继续写下去。
+3. **粘贴**：单击便签或图片复制，在支持相应内容的目标应用按 ⌘V，继续写下去。
 
-双击便签可以编辑全文，右键可以固定常用内容。图片剪贴板捕获需在设置中开启 **Catch clipboard captures**。
+双击便签可以编辑全文，右键可以固定常用内容。文字与图片可分别开启或暂停；新安装默认开启自动捕获，升级会沿用原有设置。图片开关位于菜单栏和设置中的 **“复制图片自动挂上”**。
 
 ## 20 项临时工作区，翻找时保持顺手
 
@@ -61,9 +62,9 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 
 支持 **macOS 14 及以上**，同一个安装包适用于 **Apple Silicon 和 Intel Mac**。
 
-1. [下载 DMG 安装包](https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.7/Snapline-AutoText-1.6.7.dmg)。更新前先退出旧版 Snapline。
+1. [下载 DMG 安装包](https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.8/Snapline-AutoText-1.6.8.dmg)。更新前先退出旧版 Snapline。
 2. 打开安装包，将 **Snapline.app** 拖入 **Applications（应用程序）**，再打开应用。
-3. 在菜单栏确认 **“复制文字自动挂上 / Auto-hang copied text”** 已开启，然后复制一段文字试试。
+3. 在菜单栏确认 **“复制文字自动挂上”** 与 **“复制图片自动挂上”** 已开启，然后复制一段文字或一张图片试试。
 
 当前发行版尚未经过 Apple 公证。首次打开若被 macOS 拦截，可在 **系统设置 → 隐私与安全性** 中允许打开；若系统询问剪贴板访问权限，允许后再复制文字。
 
@@ -79,7 +80,7 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 
 **内容保存在哪里？可以暂停吗？**
 
-便签和图片保存在 Mac 本机。可以在菜单栏关闭文字自动捕获；重新开启后，只收集之后新复制的内容。[查看数据与设置说明](docs/usage.zh-CN.md#安装数据与权限)。
+便签和图片保存在 Mac 本机。可以在菜单栏分别关闭文字或图片自动捕获；重新开启后，只收集之后新复制的内容。[查看数据与设置说明](docs/usage.zh-CN.md#安装数据与权限)。
 
 **展开时会遮住页面吗？**
 
