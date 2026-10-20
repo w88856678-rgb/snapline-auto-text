@@ -198,6 +198,7 @@ struct MenuTag: View {
     @ObservedObject var line: Line
 
     var body: some View {
+        Button { NotificationCenter.default.post(name: .snaplineMenuRequested, object: nil) } label: {
         VStack(spacing: -7) {
             Peg(style: Settings.current.pegStyle, seed: 1).scaleEffect(0.75, anchor: .top).frame(height: 22).zIndex(1)
             RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -209,7 +210,9 @@ struct MenuTag: View {
                 .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         }
         .contentShape(Rectangle())
-        .onTapGesture { NotificationCenter.default.post(name: .snaplineMenuRequested, object: nil) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L("Menu"))
         .help(L("Menu"))
         .background(GeometryReader { g in
             Color.clear.preference(key: HitRectsKey.self, value: [MenuTag.id: g.frame(in: .global)])

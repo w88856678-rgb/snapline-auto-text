@@ -490,12 +490,12 @@ final class Line: ObservableObject {
     /// Clipboard notes never open an editor or take keyboard focus. Reuse a
     /// matching live note; once it is taken down the same text may hang again.
     @discardableResult
-    func hangCopiedText(_ text: String, in folder: URL = Inbox.folder) -> UUID? {
+    func hangCopiedText(_ text: String, in folder: URL = Inbox.folder, quietly: Bool = false) -> UUID? {
         if let existing = items.first(where: { !$0.falling && Notes.get($0.url)?.text == text }) {
             recapture(existing.id)
             return existing.id
         }
-        return hang(Notes.create(color: "yellow", text: text, in: folder))
+        return hang(Notes.create(color: "yellow", text: text, in: folder), quietly: quietly)
     }
 
     /// A new sticky note hangs on the line, ready to be written on.

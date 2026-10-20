@@ -51,8 +51,17 @@ struct SettingsView: View {
                 }
                 .padding(.bottom, 4)
             }
+            Section(L("Opening the line")) {
+                ShortcutPreferencesView()
+                Toggle(L("Reveal when hovering at the top edge"), isOn: $s.hoverRevealEnabled)
+                Text(L("Copies are always collected in the background without opening the line."))
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(L("View the getting started guide")) { OnboardingWindow.show() }
+            }
             Section(L("The line")) {
-                Toggle(L("Stay down until each capture is used"), isOn: $s.stayDownWhileUnused)
+                if s.hoverRevealEnabled {
+                    Toggle(L("Stay down until each capture is used"), isOn: $s.stayDownWhileUnused)
+                }
                 Toggle(L("Take down after dragging into an app"), isOn: $s.takeDownAfterDrag)
                 Toggle(L("Show over full screen apps"), isOn: $s.showOverFullScreen)
                 Toggle(L("Arrange photos evenly along the line"), isOn: $s.autoArrange)
@@ -102,6 +111,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .environment(\.layoutDirection, Localization.isRTL ? .rightToLeft : .leftToRight)
+        .onChange(of: s.hoverRevealEnabled) { _, _ in apply() }
         .onChange(of: s.stayDownWhileUnused) { _, _ in apply() }
         .onChange(of: s.takeDownAfterDrag) { _, _ in apply() }
         .onChange(of: s.showOverFullScreen) { _, _ in apply() }
@@ -127,6 +137,9 @@ struct SettingsView: View {
         updated.spots = live.spots
         updated.notes = live.notes
         updated.recentCopyPath = live.recentCopyPath
+        updated.keyboardShortcut = live.keyboardShortcut
+        updated.quietOnboardingVersion = live.quietOnboardingVersion
+        updated.shortcutPracticed = live.shortcutPracticed
         Settings.current = updated
         Settings.save()
         Localization.refresh()

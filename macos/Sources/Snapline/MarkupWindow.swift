@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 @MainActor
 enum MarkupWindow {
     private static var open: [URL: NSWindow] = [:]
+    static var isEditing: Bool { !open.isEmpty }
 
     static func show(_ url: URL, line: Line) {
         if let w = open[url] { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }

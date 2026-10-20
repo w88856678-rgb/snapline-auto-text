@@ -18,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clipboard: ClipboardWatcher!
     private let recentFileImages = RecentImageCaptures()
     private var signalSources: [DispatchSourceSignal] = []
-    private var hotKey: HotKey?
+    private var revealState = QuietRevealState()
+    private var statusMenu: NSMenu!
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
 
@@ -26,11 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isPresent = false
     /// Whether the line has slid down into view.
     private var isRevealed = false
-    /// Opened on purpose with the shortcut or the menu: it stays down until
-    /// the cursor has visited it and left, or the shortcut is pressed again.
-    private var pinned = false
-    /// A new screenshot shows itself for a moment, then tucks away.
-    private var peekUntil = Date.distantPast
     private var hotZoneSince: Date?
     /// After a click in the menu bar the line stays up there hidden until the
     /// pointer leaves the menu bar, so it does not come back over a menu.
@@ -61,11 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startWatcher()
         startClipboardWatcher()
 
-        hotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey) { [weak self] in
-            self?.toggle()
-        }
-
         setUpStatusItem()
+        ShortcutController.shared.onAction = { [weak self] in
+            if !OnboardingWindow.handleShortcut() { self?.toggle() }
+        }
+        ShortcutController.shared.activate()
+        updateStatusItem()
         watchMenuBarClicks()
 
         Markup.shared.onSaved = { [weak self] url in self?.line.reloadThumbnail(for: url) }
@@ -102,32 +99,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.addObserver(forName: .snaplineSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
         }
+        center.addObserver(forName: .snaplineShortcutChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateStatusItem() }
+        }
         center.addObserver(forName: .snaplineInboxToggle, object: nil, queue: .main) { [weak self] note in
             MainActor.assumeIsolated { self?.setInbox(note.object as? Bool ?? !Inbox.isEnabled) }
         }
 
-        if !Inbox.wasOffered {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.offerInbox() }
-        }
-
-        if !Settings.current.welcomed {
-            Settings.current.welcomed = true
-            Settings.save()
-            keepOpen = true
-            wanted = true
-            refresh()
-            reveal(peekFor: 6)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-                guard let self, self.line.liveCount == 0 else { return }
-                self.keepOpen = false
-                self.wanted = false
-                self.refresh()
-            }
-        } else if line.liveCount > 0 {
-            // Photos restored from last time: the line is there, tucked away.
-            wanted = true
-            lastLiveCount = line.liveCount
-            refresh()
+        wanted = line.liveCount > 0
+        lastLiveCount = line.liveCount
+        refresh()
+        if (Settings.current.quietOnboardingVersion ?? 0) < 1 {
+            DispatchQueue.main.async { OnboardingWindow.show() }
         }
     }
 
@@ -145,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.placeOnScreen(panel.screen)
         line.look += 1
         // Rebuild the status item title, in case the language changed.
-        statusItem.button?.toolTip = "Snapline"
+        updateStatusItem()
         refresh()
     }
 
@@ -244,12 +227,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func hangCopiedText(_ text: String) {
         prepareForCapture(on: nil)
-        guard line.hangCopiedText(text) != nil else { return }
+        guard line.hangCopiedText(text, quietly: !isRevealed) != nil else { return }
         comeDown(on: panel.screen)
     }
 
-    /// A brief automatic preview is not active browsing. Once the pointer
-    /// reaches a card or navigation control, keep those cards stable.
+    /// Once the pointer reaches a card or navigation control, keep those
+    /// cards stable while new copies are collected in the background.
     private func prepareForCapture(on screen: NSScreen?) {
         if isRevealed && (line.isBrowsing || pointerOverContent(NSEvent.mouseLocation)
                           || line.menuOpen || GrabView.isDragging || line.pressedID != nil) {
@@ -314,9 +297,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastLiveCount = live
     }
 
-    /// A new capture brings the line down even when it replaces an old card
-    /// and the live item count stays unchanged.
+    /// Record new content without revealing the line, including replacements
+    /// that leave the live item count unchanged.
     private func comeDown(on screen: NSScreen?) {
+        if let id = line.latestCaptureID {
+            revealState.capture(id, liveIDs: Set(line.liveItems.map(\.id)))
+        }
+        updateStatusItem()
+        if !isRevealed {
+            wanted = line.liveCount > 0 || keepOpen
+            refresh()
+            return
+        }
         if isRevealed && line.isBrowsing {
             wanted = true
             refresh()
@@ -326,7 +318,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateCapacity()
         wanted = true
         refresh()
-        reveal(peekFor: 2.5)
     }
 
     // MARK: The capture flying to the line
@@ -349,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
         }
         prepareForCapture(on: screen)
-        guard let id = line.hang(url, flying: from != nil) else {
+        guard let id = line.hang(url, quietly: !isRevealed, flying: from != nil && isRevealed) else {
             itemsChanged()
             return
         }
@@ -357,7 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             recentFileImages.record(image, url: url, source: fromClipboard ? .clipboard : .file)
         }
         comeDown(on: panel.screen)
-        guard let from else { return }
+        guard isRevealed, let from else { return }
         // Let the line come down and lay out before measuring the landing spot.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             self?.fly(id, from: from)
@@ -413,9 +404,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             dismiss()
         }
-        // The cursor is watched while there is a line, even tucked away,
-        // to notice it pushing against the top edge.
-        if wanted { startMouseTracking() } else { stopMouseTracking() }
+        // Hidden lines watch the top edge only when hover reveal is enabled.
+        if wanted && (isRevealed || Settings.current.hoverRevealEnabled) { startMouseTracking() }
+        else { stopMouseTracking() }
     }
 
     private func present() {
@@ -435,12 +426,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func reveal(pinned: Bool = false, peekFor seconds: TimeInterval = 0) {
+    private func reveal(manually: Bool = false) {
         guard isPresent else { return }
-        if pinned { self.pinned = true }
-        if seconds > 0 { peekUntil = Date().addingTimeInterval(seconds) }
+        revealState.open(manually: manually)
         awaySince = nil
         setRevealed(true)
+        updateStatusItem()
+        startMouseTracking()
     }
 
     private func setRevealed(_ on: Bool) {
@@ -458,14 +450,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if !on {
+            revealState.close()
             line.endBrowsing()
-            pinned = false
-            peekUntil = .distantPast
             panel.ignoresMouseEvents = true
+            if !Settings.current.hoverRevealEnabled { stopMouseTracking() }
         }
     }
 
     @objc private func toggle() {
+        guard !isInteracting else { return }
         if isRevealed {
             setRevealed(false)
             if line.liveCount == 0 {
@@ -484,7 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.placeOnScreen()
         updateCapacity()
         refresh()
-        reveal(peekFor: 2.5)
+        reveal(manually: true)
     }
 
     private func startMouseTracking() {
@@ -515,19 +508,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSRect(x: screen.frame.minX, y: screen.frame.maxY - h, width: screen.frame.width, height: h)
     }
 
-    /// A click anywhere in the top bar of any screen, a menu or an icon, puts the line away.
+    private var isInteracting: Bool {
+        line.menuOpen || GrabView.isDragging || line.pressedID != nil || NoteWindow.isEditing || MarkupWindow.isEditing
+    }
+
+    private func overStatusItem(_ point: NSPoint) -> Bool {
+        guard let button = statusItem.button, let window = button.window else { return false }
+        return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+    }
+
+    /// Clicks that pass through the transparent panel dismiss only the line.
+    /// A card, note editor, menu, or an active drag keeps its interaction intact.
     private func watchMenuBarClicks() {
         let handler: (NSEvent?) -> Void = { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.line.menuOpen else { return }
-                let p = NSEvent.mouseLocation
-                guard NSScreen.screens.contains(where: { NSMouseInRect(p, Self.menuBarBand(of: $0), false) }) else { return }
+                guard let self, self.isRevealed, !self.isInteracting else { return }
+                let point = NSEvent.mouseLocation
+                guard !self.pointerOverContent(point), !self.overStatusItem(point) else { return }
                 self.menuBarSuppressed = true
                 self.hotZoneSince = nil
-                if self.isRevealed {
-                    self.pinned = false
-                    self.setRevealed(false)
-                }
+                self.setRevealed(false)
             }
         }
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: handler) {
@@ -554,7 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard isRevealed else {
             // Hover near the rope or the top edge to bring it within reach.
-            if let screen = screenUnderPointer, inRevealArea, !menuBarSuppressed,
+            if Settings.current.hoverRevealEnabled, let screen = screenUnderPointer, inRevealArea, !menuBarSuppressed,
                !isBlocked(on: screen) {
                 let since = hotZoneSince ?? now
                 hotZoneSince = since
@@ -583,11 +583,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var zone = panel.frame
         if let screen = panel.screen { zone.size.height = screen.frame.maxY - zone.minY }
         let inside = NSMouseInRect(mouse, zone, false)
-        if inside && pinned { pinned = false }
+        if revealState.isManual { awaySince = nil; return }
 
         // With "stay down until used", the line waits while something fresh hangs on it.
         let waiting = Settings.current.stayDownWhileUnused && line.hasUnused
-        let busy = pinned || waiting || line.menuOpen || GrabView.isDragging || line.pressedID != nil || now < peekUntil
+        let busy = waiting || isInteracting
         if inside || busy {
             awaySince = nil
         } else {
@@ -626,13 +626,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Menu bar
 
     private func setUpStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        let image = Self.statusImage()
-        statusItem.button?.image = image
-        statusItem.button?.toolTip = "Snapline"
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.image = Self.statusImage()
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusButtonClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusMenu = NSMenu()
+        statusMenu.delegate = self
+    }
+
+    @objc private func statusButtonClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            guard let button = statusItem.button else { return }
+            menuNeedsUpdate(statusMenu)
+            line.menuOpen = true
+            statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: button)
+            line.menuOpen = false
+        } else {
+            toggle()
+        }
+    }
+
+    private func updateStatusItem() {
+        guard statusItem != nil else { return }
+        let count = revealState.unseenIDs.count
+        statusItem.button?.title = count > 0 ? " •" : ""
+        statusItem.button?.imagePosition = .imageLeading
+        let controller = ShortcutController.shared
+        let detail = controller.registered
+            ? String(format: L("Press %@ to show or hide the line"), controller.shortcut.label)
+            : L("Shortcut unavailable. Right-click to change it.")
+        statusItem.button?.toolTip = "Snapline · " + detail + (count > 0 ? " · " + String(format: L("%d new items"), count) : "")
+        statusItem.button?.setAccessibilityLabel("Snapline · " + detail)
     }
 
     /// The capture-frame mark as a template image, so it follows the menu bar's tone.
@@ -650,7 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The same menu as the status item, popped up at the pointer when the
     /// paper tag on the line is clicked.
     private func popMenu() {
-        guard let menu = statusItem.menu else { return }
+        guard let menu = statusMenu else { return }
         menuNeedsUpdate(menu)
         line.menuOpen = true
         panel.ignoresMouseEvents = false
@@ -682,10 +708,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let toggleItem = ClosureMenuItem(isRevealed ? L("Hide line") : L("Show line")) { [weak self] in
-            self?.toggle()
+            // Wait for the menu to close so its interaction guard is released.
+            DispatchQueue.main.async { self?.toggle() }
         }
-        toggleItem.keyEquivalent = "t"
-        toggleItem.keyEquivalentModifierMask = hotKey?.usesFallback == true ? [.control, .option, .shift] : [.control, .option]
+        if ShortcutController.shared.registered {
+            toggleItem.keyEquivalent = ShortcutController.shared.shortcut.key.lowercased()
+            toggleItem.keyEquivalentModifierMask = ShortcutController.shared.shortcut.flags
+        }
         menu.addItem(toggleItem)
 
         let clearItem = ClosureMenuItem(L("Take everything down")) { [weak self] in
@@ -726,7 +755,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Settings.save()
         }
         stay.state = Settings.current.stayDownWhileUnused ? .on : .off
-        menu.addItem(stay)
+        if Settings.current.hoverRevealEnabled { menu.addItem(stay) }
 
         let takeDown = ClosureMenuItem(L("Take down after dragging into an app")) {
             Settings.current.takeDownAfterDrag.toggle()
@@ -749,6 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sound.state = line.soundOn ? .on : .off
         menu.addItem(sound)
 
+        menu.addItem(ClosureMenuItem(L("View the getting started guide")) { OnboardingWindow.show() })
         menu.addItem(ClosureMenuItem(L("Settings…"), key: ",") {
             SettingsWindow.show()
         })

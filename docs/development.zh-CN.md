@@ -4,7 +4,7 @@
 
 ## 维护范围
 
-当前 macOS 定制版本为 **1.6.8**，支持 macOS 14 及以上。本项目仅维护 `macos/` 的新增功能；仓库保留上游 Windows 源码与素材供参考，不提供 Windows 定制发行版，也不承诺 Windows 具有 macOS 定制功能。
+当前 macOS 定制版本为 **1.6.9**，支持 macOS 14 及以上。本项目仅维护 `macos/` 的新增功能；仓库保留上游 Windows 源码与素材供参考，不提供 Windows 定制发行版，也不承诺 Windows 具有 macOS 定制功能。
 
 ## 构建安装包
 
@@ -12,10 +12,10 @@
 
 ```bash
 cd macos
-VERSION=1.6.8 SIGN_IDENTITY=- bash scripts/make-dmg.sh
+VERSION=1.6.9 SIGN_IDENTITY=- bash scripts/make-dmg.sh
 ```
 
-产物位于 `macos/build/`：`Snapline.app`、`Snapline-1.6.8.dmg` 和 `Snapline-1.6.8-mac.zip`。
+产物位于 `macos/build/`：`Snapline.app`、`Snapline-1.6.9.dmg` 和 `Snapline-1.6.9-mac.zip`。
 
 `SIGN_IDENTITY=-` 强制 ad hoc 签名。当前公开发行版尚未经过 Apple 公证；发布者如需公证，应自行配置 Developer ID 与公证流程。默认 SDK 构建失败时，脚本会尝试已安装的 macOS 26 SDK；也可通过 `SDKROOT` 指定兼容 SDK。
 
@@ -38,7 +38,15 @@ python3 Tests/Standalone/run.py --build-root .build
 
 如需指定兼容 SDK，构建与 runner 应使用相同的 `SDKROOT`。测试使用独立剪贴板、临时文件和只读设置保护，不启动正式应用。
 
-## 1.6.8 验证范围
+## 1.6.9 验证范围
+
+本地 Debug 与 standalone 通过 **116 个测试、1,521 个检查，0 个失败**。新增覆盖安静收集、默认关闭悬停、主动展开会话、操作期间保护、旧设置迁移、快捷键录制与保留组合，以及不占正式容量的引导练习。
+
+原生 Carbon 注册测试验证了组合键占用、只路由自身事件、修改失败时保留旧快捷键及成功修改后释放旧组合。测试事件仅发送到测试进程，不生成桌面键盘输入。可注册不代表其它应用中没有同名命令，安装引导建议在常用应用中试按。
+
+隔离 GUI 使用私有剪贴板，确认复制文字和 PNG 后均保存内容、保持挂架隐藏并显示新增提示；默认悬停关闭，推荐快捷键注册成功。中文引导中的实际按键练习完成了示例展开与收起，并验证了修改快捷键和恢复推荐组合；示例不读取真实剪贴板或占用工作区。跨应用的实际全局按键与拖拽手势仍需在用户常用应用中确认。
+
+## 1.6.8 验证记录
 
 本地 Debug 与 standalone 通过 **103 个测试、1,415 个检查，0 个失败**。新增覆盖图片解码、透明度和朝向、PNG/TIFF 像素内容去重、网页元信息、单张 Finder 图片、混合图文复制顺序、独立开关、落盘挂起、浏览保护及中文语言匹配。
 
@@ -62,7 +70,7 @@ python3 Tests/Standalone/run.py --build-root .build
 
 [GitHub Actions](https://github.com/w88856678-rgb/snapline-auto-text/actions) 在 main 推送、针对 main 的 Pull Request 或手动触发时运行 macOS 标准 `swift test`，随后构建 universal 应用并上传 DMG/ZIP。
 
-应用内版本为 **1.6.8**，main 产物标记 `1.6.8`，PR 产物标记 `dev`。CI 只有仓库读取权限，不自动创建 Release，也不构建 Windows 定制版。
+应用内版本为 **1.6.9**，main 产物标记 `1.6.9`，PR 产物标记 `dev`。CI 只有仓库读取权限，不自动创建 Release，也不构建 Windows 定制版。
 
 ## 来源与许可证
 

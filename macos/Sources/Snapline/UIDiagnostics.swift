@@ -14,6 +14,10 @@ enum UIDiagnostics {
                 for child in Mirror(reflecting: delegate).children {
                     guard let label = child.label else { continue }
                     if let value = child.value as? Bool { values[label] = value }
+                    if let reveal = child.value as? QuietRevealState {
+                        values["manuallyOpened"] = reveal.isManual
+                        values["newItemCount"] = reveal.unseenIDs.count
+                    }
                     if let line = child.value as? Line {
                         values["lineRevealed"] = line.revealed
                         values["liveCount"] = line.liveCount
@@ -39,6 +43,10 @@ enum UIDiagnostics {
                         values["visibleRect"] = NSStringFromRect(host.visibleRect)
                     }
                 }
+                values["onboardingVisible"] = OnboardingWindow.isVisible
+                values["shortcutRegistered"] = ShortcutController.shared.registered
+                values["shortcutLabel"] = ShortcutController.shared.shortcut.label
+                values["hoverEnabled"] = Settings.current.hoverRevealEnabled
                 values["modal"] = NSApp.modalWindow != nil
                 values["stayDown"] = Settings.current.stayDownWhileUnused
                 if let data = try? JSONSerialization.data(withJSONObject: values, options: [.prettyPrinted, .sortedKeys]) {

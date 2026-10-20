@@ -40,6 +40,16 @@ struct Settings: Codable {
     /// auto, en, ar or zh-Hans.
     var language = "auto"
     var welcomed = false
+    /// Optional backing fields preserve all settings from earlier versions.
+    var keyboardShortcut: KeyboardShortcut? = nil
+    var hoverToReveal: Bool? = nil
+    var quietOnboardingVersion: Int? = nil
+    var shortcutPracticed: Bool? = nil
+    var revealShortcut: KeyboardShortcut { keyboardShortcut.flatMap { $0.isValid ? $0 : nil } ?? .standard }
+    var hoverRevealEnabled: Bool {
+        get { hoverToReveal ?? false }
+        set { hoverToReveal = newValue }
+    }
 
     struct NoteData: Codable {
         var text = ""

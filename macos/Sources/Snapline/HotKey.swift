@@ -1,31 +1,43 @@
 import Carbon
 
-/// A single global shortcut through the Carbon hot key API. Unlike a global
-/// key monitor, it needs no Accessibility permission.
+/// Registered global shortcut; no Accessibility permission or silent fallback.
+@MainActor
 final class HotKey {
     private var ref: EventHotKeyRef?
-    private(set) var usesFallback = false
-    private static var action: (() -> Void)?
+    private var handler: EventHandlerRef?
+    private let action: () -> Void
+    let identifier: EventHotKeyID
+    private static var serial: UInt32 = 0
+    private(set) var status: OSStatus = noErr
+    var isRegistered: Bool { status == noErr && ref != nil }
 
-    init(keyCode: Int, modifiers: Int, action: @escaping () -> Void) {
-        HotKey.action = action
+    init(shortcut: KeyboardShortcut, action: @escaping () -> Void) {
+        self.action = action
+        Self.serial += 1
+        identifier = EventHotKeyID(signature: OSType(0x534E_4150), id: Self.serial)
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            DispatchQueue.main.async { HotKey.action?() }
-            return noErr
-        }, 1, &spec, nil, nil)
-        let id = EventHotKeyID(signature: OSType(0x5445_4E44), id: 1) // "TEND"
-        let result = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &ref)
-        if result != noErr {
-            // Tendedero uses the same shortcut. Keep both apps usable without
-            // asking the user to quit one just to reveal this line.
-            ref = nil
-            usesFallback = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers | shiftKey), id,
-                                              GetApplicationEventTarget(), 0, &ref) == noErr
-        }
+        let installed = InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
+            guard let event, let context else { return OSStatus(eventNotHandledErr) }
+            var received = EventHotKeyID()
+            let result = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                                           MemoryLayout<EventHotKeyID>.size, nil, &received)
+            guard result == noErr else { return OSStatus(eventNotHandledErr) }
+            return MainActor.assumeIsolated {
+                let owner = Unmanaged<HotKey>.fromOpaque(context).takeUnretainedValue()
+                guard received.signature == owner.identifier.signature, received.id == owner.identifier.id else {
+                    return OSStatus(eventNotHandledErr)
+                }
+                owner.action()
+                return noErr
+            }
+        }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        guard installed == noErr else { status = installed; return }
+        status = RegisterEventHotKey(UInt32(shortcut.keyCode), UInt32(shortcut.modifiers), identifier,
+                                    GetApplicationEventTarget(), 0, &ref)
     }
 
     deinit {
         if let ref { UnregisterEventHotKey(ref) }
+        if let handler { RemoveEventHandler(handler) }
     }
 }
