@@ -9,7 +9,7 @@
 <p align="center">macOS 14+ · 简体中文界面 · Apple Silicon 与 Intel · 免费开源</p>
 
 <p align="center">
-  <a href="https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.9/Snapline-AutoText-1.6.9.dmg"><strong>下载 Mac 版 · 1.6.9</strong></a>
+  <a href="https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.10/Snapline-AutoText-1.6.10.dmg"><strong>下载 Mac 版 · 1.6.10</strong></a>
   &nbsp;·&nbsp;
   <a href="docs/usage.zh-CN.md">使用指南</a>
   &nbsp;·&nbsp;
@@ -68,7 +68,7 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 
 支持 **macOS 14 及以上**，同一个安装包适用于 **Apple Silicon 和 Intel Mac**。
 
-1. [下载 DMG 安装包](https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.9/Snapline-AutoText-1.6.9.dmg)。更新前先退出旧版 Snapline。
+1. [下载 DMG 安装包](https://github.com/w88856678-rgb/snapline-auto-text/releases/download/v1.6.10/Snapline-AutoText-1.6.10.dmg)。更新前先退出旧版 Snapline。
 2. 打开安装包，将 **Snapline.app** 拖入 **Applications（应用程序）**，再打开应用。
 3. 首次打开按中文引导试一次快捷键：展开示例，再收起。可修改快捷键或稍后再试；文字与图片捕获可分别开启或暂停。
 
@@ -92,9 +92,9 @@ Snapline AutoText 是一个放在屏幕顶部的 macOS 图文临时工作区。�
 
 默认不会因鼠标经过顶部或复制内容而展开，只在后台收集并用菜单栏小圆点提示。按 **⌃⌘L** 或单击菜单栏图标才展开，此时会覆盖页面顶部区域；再次按快捷键或点击外部可收起。悬停展开可在设置中手动开启，默认关闭。
 
-**可以把文字直接拖进其他应用吗？**
+**可以把图文直接拖进聊天框吗？**
 
-文字便签提供纯文字拖拽格式，但跨应用拖拽兼容性仍待实机验证。日常推荐使用“单击便签 → 在目标应用按 ⌘V”的取用方式。
+可以按住卡片向下或斜向拖出，不需要长按。便签传送完整纯文字，图片作为文件拖出；水平拖动可调整架上位置。本地 WebKit 聊天输入框已验证接收完整文字，其他应用的接收能力可能不同；也可单击复制后在目标应用按 ⌘V。
 
 ## 了解更多
 

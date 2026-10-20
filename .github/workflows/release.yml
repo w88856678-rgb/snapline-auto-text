@@ -1,6 +1,6 @@
 # macOS validation only. Releases are created manually after review.
-# Main builds use the 1.6.9 artifact label; PR builds use dev.
-# Both keep the app bundle version numeric (1.6.9).
+# Main builds use the 1.6.10 artifact label; PR builds use dev.
+# Both keep the app bundle version numeric (1.6.10).
 name: macOS build and test
 
 on:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  VERSION: '1.6.9'
+  VERSION: '1.6.10'
   APP_DISPLAY_NAME: Snapline 自动文字版
   SIGN_IDENTITY: '-'
 
@@ -47,6 +47,6 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ github.event_name == 'pull_request' && 'Snapline-AutoText-dev' || 'Snapline-AutoText-1.6.9' }}
+          name: ${{ github.event_name == 'pull_request' && 'Snapline-AutoText-dev' || 'Snapline-AutoText-1.6.10' }}
           path: out-mac/*
           if-no-files-found: error

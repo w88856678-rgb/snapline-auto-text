@@ -18,6 +18,7 @@ final class LinePanel: NSPanel {
         isMovable = false
         becomesKeyOnlyIfNeeded = true
         ignoresMouseEvents = true
+        acceptsMouseMovedEvents = true
         contentView = content
     }
 

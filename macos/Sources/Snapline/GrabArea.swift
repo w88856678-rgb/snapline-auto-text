@@ -139,7 +139,7 @@ extension Notes {
     }
 }
 
-final class GrabView: NSView, NSDraggingSource {
+class GrabView: NSView, NSDraggingSource {
     nonisolated(unsafe) static var isDragging = false
 
     var url: URL?
@@ -160,6 +160,9 @@ final class GrabView: NSView, NSDraggingSource {
 
     private var downPoint: NSPoint?
     private var downScreen: NSPoint?
+    private var downEvent: NSEvent?
+    private var grabPoint = NSPoint.zero
+    private var pressedCorner = 0
     private var startedDrag = false
     private var draggingText = false
     private var sliding = false
@@ -169,8 +172,6 @@ final class GrabView: NSView, NSDraggingSource {
     /// How long you hold before the editor opens. Long enough not to fire on a
     /// slow click, short enough to feel deliberate.
     private static let holdDuration: TimeInterval = 0.45
-    /// How far down or up the pointer goes before a slide along the line becomes a drag out.
-    private static let pullAway: CGFloat = 44
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -189,23 +190,27 @@ final class GrabView: NSView, NSDraggingSource {
     }
 
     override func mouseDown(with event: NSEvent) {
-        switch corner(of: event) {
-        case 1: downPoint = nil; onDiscard(); return
-        case 2: downPoint = nil; onPen(); return
-        default: break
-        }
-        if event.clickCount == 2 {
+        endPress()
+        downPoint = nil
+        downScreen = nil
+        downEvent = nil
+        pressedCorner = corner(of: event)
+        if event.clickCount == 2, pressedCorner == 0 {
             downPoint = nil
             onDoubleClick()
             return
         }
         downPoint = event.locationInWindow
-        downScreen = NSEvent.mouseLocation
+        downScreen = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+        downEvent = event
+        grabPoint = convert(event.locationInWindow, from: nil)
         startedDrag = false
         sliding = false
         didLongPress = false
         onPressChange(true)
-        holdTimer?.invalidate()
+        // Corner controls commit on release, so grabbing a corner can still
+        // become a drag without discarding the card or opening its editor.
+        guard pressedCorner == 0 else { return }
         holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdDuration, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.downPoint != nil, !self.startedDrag, !self.sliding else { return }
@@ -223,38 +228,27 @@ final class GrabView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let start = downPoint, let startScreen = downScreen, !startedDrag, let url else { return }
-        let p = event.locationInWindow
-        let now = NSEvent.mouseLocation
+        guard downPoint != nil, let startScreen = downScreen, !startedDrag, let url else { return }
+        let now = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
         let dx = now.x - startScreen.x, dy = now.y - startScreen.y
         guard !didLongPress else { return }
 
-        if sliding {
-            if abs(dy) > Self.pullAway {
-                // Pulled away from the line: it becomes a real drag into another app.
-                sliding = false
-                onSlideEnd()
-                beginDrag(url: url, event: event)
-                return
+        switch CardDragIntent.resolve(dx: dx, dy: dy, sliding: sliding) {
+        case .waiting: return
+        case .slide:
+            endPress()
+            if !sliding {
+                sliding = true
+                if let window {
+                    let frameInScreen = window.convertToScreen(convert(bounds, to: nil))
+                    grabOffset = frameInScreen.midX - startScreen.x
+                }
             }
             onSlide(now.x + grabOffset)
-            return
+        case .export:
+            if sliding { sliding = false; onSlideEnd() }
+            beginDrag(url: url, event: event)
         }
-
-        guard hypot(p.x - start.x, p.y - start.y) > 4 else { return }
-        endPress()
-        if abs(dy) <= Self.pullAway && abs(dx) >= 4 {
-            // Sliding along the line moves the photo.
-            sliding = true
-            if let window {
-                let frameInScreen = window.convertToScreen(convert(bounds, to: nil))
-                grabOffset = frameInScreen.midX - startScreen.x
-            }
-            onSlide(now.x + grabOffset)
-            return
-        }
-        if abs(dy) <= Self.pullAway { return }
-        beginDrag(url: url, event: event)
     }
 
     /// The pointer grabbed the card somewhere; keep that offset so the card does not jump.
@@ -265,12 +259,21 @@ final class GrabView: NSView, NSDraggingSource {
         endPress()
         draggingText = Notes.isNote(url)
         let item = NSDraggingItem(pasteboardWriter: CardTransfer.dragWriter(for: url))
-        item.setDraggingFrame(imageFrame(), contents: dragImage)
-        let session = beginDraggingSession(with: [item], event: event, source: self)
-        // Released where nothing accepts it: it flies back to the line.
-        session.animatesToStartingPositionsOnCancelOrFail = true
+        // AppKit uses the original mouse-down position as the grab offset.
+        // Account for a card that moved during a horizontal rearrangement.
+        let originEvent = downEvent ?? event
+        let anchor = convert(originEvent.locationInWindow, from: nil)
+        item.setDraggingFrame(imageFrame().offsetBy(dx: anchor.x - grabPoint.x, dy: anchor.y - grabPoint.y), contents: dragImage)
         GrabView.isDragging = true
         onDragStart()
+        startDragging(items: [item], event: originEvent)
+    }
+
+    /// Kept separate so native event tests can inspect the prepared session
+    /// without posting events or starting a drag on the user's desktop.
+    func startDragging(items: [NSDraggingItem], event: NSEvent) {
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -279,9 +282,15 @@ final class GrabView: NSView, NSDraggingSource {
             sliding = false
             onSlideEnd()
         } else if downPoint != nil && !startedDrag && !didLongPress && event.clickCount == 1 {
-            onClick()
+            if pressedCorner == 0 { onClick() }
+            else if corner(of: event) == pressedCorner {
+                if pressedCorner == 1 { onDiscard() } else { onPen() }
+            }
         }
         downPoint = nil
+        downScreen = nil
+        downEvent = nil
+        pressedCorner = 0
         didLongPress = false
     }
 
@@ -303,6 +312,9 @@ final class GrabView: NSView, NSDraggingSource {
         GrabView.isDragging = false
         startedDrag = false
         downPoint = nil
+        downScreen = nil
+        downEvent = nil
+        pressedCorner = 0
         log.notice("Drag ended with operation \(operation.rawValue, privacy: .public)")
         // Dropped on the Trash: macOS only tells us, we move the file.
         if operation.contains(.delete) {

@@ -4,7 +4,7 @@
 
 ## 维护范围
 
-当前 macOS 定制版本为 **1.6.9**，支持 macOS 14 及以上。本项目仅维护 `macos/` 的新增功能；仓库保留上游 Windows 源码与素材供参考，不提供 Windows 定制发行版，也不承诺 Windows 具有 macOS 定制功能。
+当前 macOS 定制版本为 **1.6.10**，支持 macOS 14 及以上。本项目仅维护 `macos/` 的新增功能；仓库保留上游 Windows 源码与素材供参考，不提供 Windows 定制发行版，也不承诺 Windows 具有 macOS 定制功能。
 
 ## 构建安装包
 
@@ -12,10 +12,10 @@
 
 ```bash
 cd macos
-VERSION=1.6.9 SIGN_IDENTITY=- bash scripts/make-dmg.sh
+VERSION=1.6.10 SIGN_IDENTITY=- bash scripts/make-dmg.sh
 ```
 
-产物位于 `macos/build/`：`Snapline.app`、`Snapline-1.6.9.dmg` 和 `Snapline-1.6.9-mac.zip`。
+产物位于 `macos/build/`：`Snapline.app`、`Snapline-1.6.10.dmg` 和 `Snapline-1.6.10-mac.zip`。
 
 `SIGN_IDENTITY=-` 强制 ad hoc 签名。当前公开发行版尚未经过 Apple 公证；发布者如需公证，应自行配置 Developer ID 与公证流程。默认 SDK 构建失败时，脚本会尝试已安装的 macOS 26 SDK；也可通过 `SDKROOT` 指定兼容 SDK。
 
@@ -38,7 +38,17 @@ python3 Tests/Standalone/run.py --build-root .build
 
 如需指定兼容 SDK，构建与 runner 应使用相同的 `SDKROOT`。测试使用独立剪贴板、临时文件和只读设置保护，不启动正式应用。
 
-## 1.6.9 验证范围
+## 1.6.10 验证范围
+
+本地 Debug 与 standalone 通过 **125 个测试、1,604 个检查，0 个失败**。新增覆盖 4 点垂直拉出、短距离斜向拉出、水平整理后 8 点转向、微小手抖保留单击、双击编辑、拖拽取消长按，以及边角按钮按下不执行、松手提交或取消。
+
+原生 AppKit 事件测试直接调用实际 `GrabView`，检查只准备一次拖拽、使用原始 mouse-down 锚点、导出图片文件 URL 和边角拖动不执行丢弃/编辑。探针只替代最终会话启动，不向桌面发送合成输入；原有完整文字传输与图片复制测试继续运行。
+
+隔离应用使用虚构便签和图片、私有数据目录与剪贴板。本地 WebKit 聊天输入框实际接收到完整文字和换行，拖入类型为 `text/plain`，没有便签图片。图片文件导出格式已由事件与剪贴板测试覆盖，第三方聊天软件的实际接收能力仍取决于目标应用。本地测试页没有发送消息或网络请求。
+
+拖拽锚点遵循 [Apple 的 AppKit 接口说明](https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:))。Debug 隔离 bundle 可以用 `SnaplineDiagnosticDataDirectory` 和 `SnaplineDiagnosticShowOnLaunch` 在启动时展开测试挂架；正式发行版不包含这个测试入口。
+
+## 1.6.9 验证记录
 
 本地 Debug 与 standalone 通过 **116 个测试、1,521 个检查，0 个失败**。新增覆盖安静收集、默认关闭悬停、主动展开会话、操作期间保护、旧设置迁移、快捷键录制与保留组合，以及不占正式容量的引导练习。
 
@@ -70,7 +80,7 @@ python3 Tests/Standalone/run.py --build-root .build
 
 [GitHub Actions](https://github.com/w88856678-rgb/snapline-auto-text/actions) 在 main 推送、针对 main 的 Pull Request 或手动触发时运行 macOS 标准 `swift test`，随后构建 universal 应用并上传 DMG/ZIP。
 
-应用内版本为 **1.6.9**，main 产物标记 `1.6.9`，PR 产物标记 `dev`。CI 只有仓库读取权限，不自动创建 Release，也不构建 Windows 定制版。
+应用内版本为 **1.6.10**，main 产物标记 `1.6.10`，PR 产物标记 `dev`。CI 只有仓库读取权限，不自动创建 Release，也不构建 Windows 定制版。
 
 ## 来源与许可证
 

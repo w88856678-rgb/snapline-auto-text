@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// pointer leaves the menu bar, so it does not come back over a menu.
     private var menuBarSuppressed = false
     private var clickMonitors: [Any] = []
+    private var pointerMonitors: [Any] = []
     private var awaySince: Date?
     /// Whether the line should be up, if nothing prevents it. Full screen apps
     /// block it unless the user allows the line over them.
@@ -112,6 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if (Settings.current.quietOnboardingVersion ?? 0) < 1 {
             DispatchQueue.main.async { OnboardingWindow.show() }
         }
+        #if DEBUG
+        if Bundle.main.object(forInfoDictionaryKey: "SnaplineDiagnosticDataDirectory") is String,
+           Bundle.main.object(forInfoDictionaryKey: "SnaplineDiagnosticShowOnLaunch") as? Bool == true {
+            DispatchQueue.main.async { self.showLine() }
+        }
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -440,6 +447,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isRevealed = on
         line.revealed = on
         if on {
+            // Accept a grab immediately, including when the pointer was
+            // already over a card as the shortcut opened the line.
+            updateMousePassThrough(NSEvent.mouseLocation)
+            watchPointerMovement()
             if isPresent { panel.orderFrontRegardless() }
         } else {
             // An invisible strip still appears to screen automation as the
@@ -450,6 +461,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if !on {
+            pointerMonitors.forEach { NSEvent.removeMonitor($0) }
+            pointerMonitors.removeAll()
             revealState.close()
             line.endBrowsing()
             panel.ignoresMouseEvents = true
@@ -515,6 +528,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func overStatusItem(_ point: NSPoint) -> Bool {
         guard let button = statusItem.button, let window = button.window else { return false }
         return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+    }
+
+    /// Switch click-through as soon as the pointer reaches a card, rather
+    /// than waiting for the next 30 Hz hover/auto-hide tick. Only runs open.
+    private func watchPointerMovement() {
+        guard pointerMonitors.isEmpty else { return }
+        let moved: (NSEvent) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isRevealed else { return }
+                self.updateMousePassThrough(NSEvent.mouseLocation)
+            }
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved, handler: moved) {
+            pointerMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved, handler: { event in moved(event); return event }) {
+            pointerMonitors.append(local)
+        }
     }
 
     /// Clicks that pass through the transparent panel dismiss only the line.
